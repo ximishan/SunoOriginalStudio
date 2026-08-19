@@ -1,6 +1,6 @@
-status=success
-run_id=32228077793
+status=started
+run_id=32228478848
 artifact=SunoOriginalStudio_v0.4.0_Windows
 exe=SunoOriginalStudio_v0.4.0.exe
-source_sha=03da18e7019349a3038ec92f2422a0842047a52f
+source_sha=330bfdbeb044839e7798e9132dd83637f9e08e61
 exact_n19_toolchain=true
