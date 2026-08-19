@@ -1,4 +1,5 @@
 name: Upgrade SunoOriginalStudio v0.5.6
+# trigger: canonical v0.5.6 source upgrade
 
 on:
   workflow_dispatch:
