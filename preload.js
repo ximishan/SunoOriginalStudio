@@ -47,3 +47,13 @@ contextBridge.exposeInMainWorld('demoApi', {
     return () => ipcRenderer.removeListener('deai:progress', listener);
   },
 });
+
+// Keep the Suno account area independent from renderer.js' legacy sequential
+// refresh. The controller replaces the visible account container after the
+// page is ready, so there are always exactly three fixed slots (1/2/3).
+window.addEventListener('DOMContentLoaded', () => {
+  const script = document.createElement('script');
+  script.src = 'account_slots_fix.js';
+  script.async = false;
+  document.body.appendChild(script);
+});
