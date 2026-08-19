@@ -54,8 +54,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build_status/suno_original_studio.txt
-          git commit -m "Start SunoOriginalStudio v0.5.2 build ${{ github.run_id }}" || exit 0
-          git push
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 1) {
+            git commit -m "Start SunoOriginalStudio v0.5.2 build ${{ github.run_id }}"
+            git push
+          } else {
+            Write-Host 'Build status already current.'
+          }
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -66,9 +71,15 @@ jobs:
         shell: pwsh
         run: |
           node tools/apply_negative_style_patch.js
+          if ($LASTEXITCODE -ne 0) { throw 'v0.5.2 source patch failed' }
           git add main.js renderer.js song_library.js index.html package.json
-          git commit -m "Apply excluded-style parameter to v0.5.2 source" || exit 0
-          git push
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 1) {
+            git commit -m "Apply excluded-style parameter to v0.5.2 source"
+            git push
+          } else {
+            Write-Host 'v0.5.2 source patch already committed.'
+          }
 
       - name: Install JavaScript dependencies
         run: npm install
@@ -198,5 +209,10 @@ jobs:
           negative_style=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git add build_status/suno_original_studio.txt
-          git commit -m "Finish SunoOriginalStudio v0.5.2 build ${{ github.run_id }}" || exit 0
-          git push
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 1) {
+            git commit -m "Finish SunoOriginalStudio v0.5.2 build ${{ github.run_id }}"
+            git push
+          } else {
+            Write-Host 'Success status already current.'
+          }
