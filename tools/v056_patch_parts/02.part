@@ -1,0 +1,132 @@
+h('userData'),
+  };
+}
+
+const profileInfo = prepareStableProfile();''',
+    'replace duplicated bootstrap auth helpers',
+    'const state = await getAccountStatus(slot);',
+)
+patch_literal(
+    'bootstrap.js',
+    "const { registerSongLibraryIpc } = require('./song_library');",
+    "const { registerSongLibraryIpc, startSongLibraryAutomation, stopSongLibraryAutomation } = require('./song_library');",
+    'song automation imports',
+)
+patch_literal(
+    'bootstrap.js',
+    "  registerSongLibraryIpc({ app, ipcMain, dialog, shell });",
+    "  registerSongLibraryIpc({ app, ipcMain, dialog, shell });\n  startSongLibraryAutomation(app);",
+    'start background pipeline',
+    'startSongLibraryAutomation(app);',
+)
+patch_literal(
+    'bootstrap.js',
+    "  Promise.allSettled(ACCOUNT_SLOTS.map(slot => flushAccountSession(slot)))",
+    "  stopSongLibraryAutomation();\n  destroyAuthWindows();\n  flushAllAccountSessions()",
+    'stop background pipeline on quit',
+    'stopSongLibraryAutomation();',
+)
+
+# song_library.js: shared auth and persistent automatic pipeline.
+patch_literal(
+    'song_library.js',
+    "const { BrowserWindow, session } = require('electron');",
+    "const { BrowserWindow } = require('electron');\nconst { sessionFor, apiHeaders } = require('./suno_session');",
+    'shared auth import',
+    "require('./suno_session')",
+)
+patch_literal(
+    'song_library.js',
+    "const SUNO_HOME = 'https://suno.com/';\nconst SUNO_STUDIO = 'https://suno.com/studio';\nconst SUNO_API = 'https://studio-api-prod.suno.com';",
+    "const SUNO_API = 'https://studio-api-prod.suno.com';\nconst DEFAULT_POLL_INTERVAL_MS = 5000;",
+    'remove duplicate auth constants',
+)
+patch_literal(
+    'song_library.js',
+    'let activeProcess = null;',
+    '''let activeProcess = null;
+let automationTimer = null;
+let automationApp = null;
+let automationRunning = false;
+let automationLastRunAt = '';
+let automationLastError = '';
+const automationRetry = new Map();''',
+    'automation runtime state',
+    'let automationTimer = null;',
+)
+patch_regex(
+    'song_library.js',
+    r"\nfunction partitionFor\(slot\) \{\n  return `persist:suno-original-demo-\$\{slot\}`;\n\}\n",
+    '\n',
+    'remove song partitionFor',
+    'function startSongLibraryAutomation(app) {',
+)
+patch_regex(
+    'song_library.js',
+    r"function readState\(app\) \{[\s\S]*?\n\}\n\nfunction writeState",
+    '''function normalizeAutomation(value = {}) {
+  const pollIntervalMs = Number(value.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
+  return {
+    autoDownload: Boolean(value.autoDownload),
+    autoN19: Boolean(value.autoN19),
+    pollIntervalMs: Math.max(3000, Math.min(60000, Number.isFinite(pollIntervalMs) ? pollIntervalMs : DEFAULT_POLL_INTERVAL_MS)),
+  };
+}
+
+function readState(app) {
+  const file = libraryFile(app);
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return {
+      version: 2,
+      rootDir: parsed.rootDir || defaultRoot(app),
+      automation: normalizeAutomation(parsed.automation),
+      songs: Array.isArray(parsed.songs) ? parsed.songs : [],
+    };
+  } catch {
+    return { version: 2, rootDir: defaultRoot(app), automation: normalizeAutomation(), songs: [] };
+  }
+}
+
+function writeState''',
+    'persistent automation settings',
+    'automation: normalizeAutomation(parsed.automation)',
+)
+patch_regex(
+    'song_library.js',
+    r"function emit\(sender, payload\) \{[\s\S]*?\n\}\n\nfunction safeName",
+    '''function emit(sender, payload) {
+  let delivered = false;
+  try {
+    if (sender && !sender.isDestroyed()) {
+      sender.send('song-library:changed', payload);
+      delivered = true;
+    }
+  } catch {}
+  if (delivered) return;
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (!win.isDestroyed() && win.webContents.getURL().startsWith('file://')) {
+        win.webContents.send('song-library:changed', payload);
+      }
+    } catch {}
+  }
+}
+
+function safeName''',
+    'broadcast automatic pipeline events',
+    'let delivered = false;',
+)
+patch_regex(
+    'song_library.js',
+    r"async function hiddenAuthToken\(slot\) \{[\s\S]*?\nasync function refreshSlotSongs\(slot, songs\) \{",
+    'async function refreshSlotSongs(slot, songs) {',
+    'remove duplicate token/header implementation',
+    'function startSongLibraryAutomation(app) {',
+)
+text = read('song_library.js')
+next_text = text.replace('session.fromPartition(partitionFor(slot))', 'sessionFor(slot)')
+if next_text != text:
+    write('song_library.js', next_text)
+
+helpers_anchor = 
