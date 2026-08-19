@@ -1,5 +1,6 @@
-status=success
-run_id=32223536964
-artifact=SunoOriginalStudio_v0.3.0_Windows
-exe=SunoOriginalStudio_v0.3.0.exe
-source_sha=b0bae3d8390a210de736b7b6e73ccd6925eef3b0
+status=started
+run_id=32227693259
+artifact=SunoOriginalStudio_v0.4.0_Windows
+exe=SunoOriginalStudio_v0.4.0.exe
+source_sha=b65a8d4d6aa3e139158d58e82e3d97887846e2ef
+exact_n19_toolchain=true
