@@ -1,0 +1,70 @@
+name: Build SunoOriginalStudio Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'main.js'
+      - 'preload.js'
+      - 'renderer.js'
+      - 'index.html'
+      - 'package.json'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        run: npm install
+
+      - name: Syntax check
+        shell: pwsh
+        run: |
+          node --check main.js
+          node --check preload.js
+          node --check renderer.js
+
+      - name: Build portable EXE
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Verify EXE
+        shell: pwsh
+        run: |
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.2.0.exe'
+          if ($exe.Length -lt 50000000) { throw "EXE unexpectedly small: $($exe.Length)" }
+          Write-Host "Built:" $exe.FullName $exe.Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SunoOriginalStudio_v0.2.0_Windows
+          path: dist/SunoOriginalStudio_v0.2.0.exe
+          if-no-files-found: error
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: suno-original-studio-v0.2.0
+          name: Suno Original Studio v0.2.0
+          prerelease: true
+          make_latest: false
+          files: dist/SunoOriginalStudio_v0.2.0.exe
+          body: |
+            Adds the official Suno human-verification handoff for original-song generation.
+            Supports hCaptcha and Cloudflare Turnstile according to Suno captcha_version.
+            The application does not solve or bypass CAPTCHA; the official challenge is completed in the user's own Suno session and the returned token is used to resume the pending request.
