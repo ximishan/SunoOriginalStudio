@@ -1,5 +1,5 @@
 {
-  "name": "suno-original-studio",
+  "name": "suno-original-demo",
   "version": "0.2.0",
   "description": "Standalone Suno original-song desktop tool with official human-verification handoff",
   "main": "main.js",
@@ -14,8 +14,8 @@
     "electron-builder": "26.0.12"
   },
   "build": {
-    "appId": "com.sunooriginalstudio.desktop",
-    "productName": "SunoOriginalStudio",
+    "appId": "com.musicvmauto.sunooriginaldemo",
+    "productName": "Suno原创Demo",
     "asar": true,
     "files": ["main.js", "preload.js", "index.html", "renderer.js", "package.json"],
     "win": {
