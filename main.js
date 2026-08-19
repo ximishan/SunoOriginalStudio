@@ -605,7 +605,7 @@ function buildOriginalPayload(input, verification = {}) {
     generation_type: 'TEXT',
     title: String(input.title || '').trim(),
     tags,
-    negative_tags: '',
+    negative_tags: String(input.negativeStyle || '').trim(),
     mv: MODEL_MAP[input.modelVersion] || 'chirp-fenix',
     prompt: String(input.lyrics || ''),
     make_instrumental: false,
@@ -743,7 +743,7 @@ function createMainWindow() {
     height: 820,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Suno Original Studio v0.2.0',
+    title: 'Suno Original Studio v0.5.2',
     backgroundColor: '#0b0c10',
     autoHideMenuBar: true,
     webPreferences: {
