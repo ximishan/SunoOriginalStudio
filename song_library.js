@@ -373,6 +373,23 @@ async function processSelectedSongs(app, clipIds, sender) {
         throw new Error(`歌曲尚未生成完成：${song.generationStatus || 'submitted'}`);
       }
 
+      // v0.5.3 safety guard: a completed N19 result is authoritative.
+      // Even if the renderer sends this clipId again, never download/process it twice.
+      if (String(song.deaiStatus || '').toLowerCase() === 'complete') {
+        emit(sender, { type: 'progress', clipId: song.clipId, message: '这首歌已经完成 AI 消痕，已自动跳过，不会重复处理。' });
+        results.push({
+          clipId: song.clipId,
+          ok: true,
+          skipped: true,
+          reason: 'already_processed',
+          localDir: song.localDir || '',
+          sourceWavPath: song.sourceWavPath || '',
+          processedWavPath: song.processedWavPath || '',
+          lyricsPath: song.lyricsPath || '',
+        });
+        continue;
+      }
+
       const dir = songDir(rootDir, song);
       fs.mkdirSync(dir, { recursive: true });
       const lyricsPath = path.join(dir, '歌词.txt');
@@ -416,7 +433,14 @@ async function processSelectedSongs(app, clipIds, sender) {
       results.push({ clipId: song.clipId, ok: false, error });
     }
   }
-  return { rootDir, results, successCount: results.filter(x => x.ok).length, total: results.length };
+  return {
+    rootDir,
+    results,
+    successCount: results.filter(x => x.ok && !x.skipped).length,
+    skippedCount: results.filter(x => x.skipped).length,
+    failureCount: results.filter(x => !x.ok).length,
+    total: results.length,
+  };
 }
 
 function registerSongLibraryIpc({ app, ipcMain, dialog, shell }) {

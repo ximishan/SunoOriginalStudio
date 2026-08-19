@@ -172,8 +172,9 @@ function renderSongLibrary() {
     return;
   }
   body.innerHTML = songs.map(song => {
-    const canSelect = isSongComplete(song) && song.deaiStatus !== 'processing';
-    const checked = selectedSongIds.has(song.clipId) ? 'checked' : '';
+    const canSelect = isSongComplete(song) && song.deaiStatus !== 'processing' && song.deaiStatus !== 'complete';
+    if (!canSelect) selectedSongIds.delete(song.clipId);
+    const checked = canSelect && selectedSongIds.has(song.clipId) ? 'checked' : '';
     const g = generationBadge(song.generationStatus);
     const w = wavBadge(song.wavStatus);
     const d = deaiBadge(song.deaiStatus);
@@ -241,7 +242,7 @@ $('libraryRefresh').onclick = async () => {
 $('librarySelectAll').onclick = () => {
   selectedSongIds.clear();
   for (const song of songLibrary.songs || []) {
-    if (isSongComplete(song) && song.deaiStatus !== 'processing') selectedSongIds.add(song.clipId);
+    if (isSongComplete(song) && song.deaiStatus !== 'processing' && song.deaiStatus !== 'complete') selectedSongIds.add(song.clipId);
   }
   renderSongLibrary();
 };
@@ -285,7 +286,8 @@ $('libraryProcessSelected').onclick = async () => {
     const result = await window.demoApi.processSelectedSongs(ids);
     await loadSongLibrary(false);
     const failed = (result.results || []).filter(x => !x.ok);
-    libraryLog(`处理完成：成功 ${result.successCount}/${result.total}${failed.length ? `，失败 ${failed.length}` : ''}。`, failed.length ? 'warn' : 'oktxt');
+    const skipped = Number(result.skippedCount || 0);
+    libraryLog(`处理完成：新处理成功 ${result.successCount}，已消痕跳过 ${skipped}${failed.length ? `，失败 ${failed.length}` : ''}。`, failed.length ? 'warn' : 'oktxt');
     selectedSongIds.clear();
     renderSongLibrary();
   } catch (e) {
