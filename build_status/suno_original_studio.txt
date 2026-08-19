@@ -1,0 +1,5 @@
+status=started
+run_id=32217560296
+artifact=SunoOriginalStudio_v0.2.0_Windows
+exe=SunoOriginalStudio_v0.2.0.exe
+source_sha=7e0dbfb40a3ccface2e23b088399a43e086d77c4
