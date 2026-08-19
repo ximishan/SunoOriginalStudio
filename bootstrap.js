@@ -68,11 +68,27 @@ function prepareStableProfile() {
 }
 
 const flushTimers = new Map();
+const accountStateTimers = new Map();
+const lastKnownLoginState = new Map();
 
 function emitAccountStateChanged(slot) {
-  setTimeout(async () => {
+  slot = String(slot);
+  const old = accountStateTimers.get(slot);
+  if (old) clearTimeout(old);
+
+  const timer = setTimeout(async () => {
+    accountStateTimers.delete(slot);
     let state;
     try { state = await getAccountStatus(slot); } catch { return; }
+
+    const previous = lastKnownLoginState.get(slot);
+    lastKnownLoginState.set(slot, Boolean(state.loggedIn));
+
+    // Cookie/Clerk 初始化会产生很多 changed 事件。只有真正的登录状态
+    // 发生变化时才通知 renderer，避免多个 refreshAccounts() 交叉执行，
+    // 导致账号 1/2/3 在界面上重复追加。
+    if (previous === undefined || previous === Boolean(state.loggedIn)) return;
+
     for (const win of BrowserWindow.getAllWindows()) {
       try {
         if (!win.isDestroyed() && win.webContents.getURL().startsWith('file://')) {
@@ -80,7 +96,9 @@ function emitAccountStateChanged(slot) {
         }
       } catch {}
     }
-  }, 900);
+  }, 1200);
+
+  accountStateTimers.set(slot, timer);
 }
 
 function scheduleAccountFlush(slot, delay = 700) {
@@ -111,6 +129,7 @@ function installAccountPersistence() {
 
 async function robustAccountStatus(slot) {
   const state = await getAccountStatus(slot);
+  lastKnownLoginState.set(String(slot), Boolean(state.loggedIn));
   return {
     ...state,
     windowOpen: false,
@@ -155,6 +174,8 @@ app.on('before-quit', event => {
   quitFlushStarted = true;
   stopSongLibraryAutomation();
   destroyAuthWindows();
+  for (const timer of accountStateTimers.values()) clearTimeout(timer);
+  accountStateTimers.clear();
   flushAllAccountSessions()
     .finally(() => {
       quitFlushDone = true;
