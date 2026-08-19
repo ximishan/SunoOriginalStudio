@@ -1,324 +1,780 @@
-# SunoOriginalStudio 项目功能清单与 AVR 功能对照
+# SunoOriginalStudio 项目功能清单、当前状态与开发路线图
 
-> 用途：持续记录本项目要做的全部功能、已完成功能、未完成功能，以及 AVR Suno Cover 1.77.0 的详细功能清单。后续每个版本都要同步更新本文件，确保换对话窗口后也能直接继续开发。
-
----
-
-## 一、项目目标
-
-SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是：
-
-- 使用用户自己的 Suno 账号
-- 原创歌曲生成
-- 用户自己输入完整歌词、歌名、风格提示词
-- 3 个独立 Suno 账号 Session
-- Suno 官方人机验证衔接
-- 任务状态查询，后续自动轮询与下载
-- Excel 批量原创、多账号轮流执行、断点恢复
-- 集成 AVR 1.77.0 N19 AI 消痕完整音频链路
-
-明确不做：AVR 激活码、License、设备绑定、授权到期、最大批次数授权限制、消息中心、公告、反馈、AVR 远程模型配置下发、AVR 自有版本更新体系、智能母带。
+> 这是项目的主状态文档。以后每次增加功能、修 Bug、改开发优先级，都必须同步更新这里。
+>
+> 当前功能基线：**v0.5.4**  
+> 仓库：`ximishan/SunoOriginalStudio`  
+> v0.5.4 正式 Windows 构建：GitHub Actions Run `32251234629`，状态 `success`。
 
 ---
 
-## 二、当前版本与状态
+# 一、项目目标
 
-当前开发版本：`v0.5.4`
+SunoOriginalStudio 是独立的 Windows Electron 桌面工具，主线只围绕以下能力展开：
 
-仓库：`ximishan/SunoOriginalStudio`
+1. 使用用户自己的 Suno 账号。
+2. 3 个独立 Suno 登录 Session。
+3. 原创歌曲提交。
+4. 用户自己填写歌名、完整歌词、风格、排除风格等参数。
+5. Suno 官方 hCaptcha / Cloudflare Turnstile 验证衔接。
+6. 持久化歌曲列表，记录每个 Suno clip 的状态。
+7. Suno WAV 下载与本地作品目录。
+8. AVR 1.77.0 N19 `SoX + Rubber Band + FFmpeg` 完整音频链路。
+9. 歌曲列表内试听。
+10. 后续增加：自动轮询、自动下载、自动 N19、Excel 批量原创、3 账号调度、断点恢复。
 
-状态说明：
+明确不做：
 
-- ✅ 已完成：代码已经存在并可进入实际测试
-- 🟡 部分完成：核心链路有了，但还需要持续实机兼容验证、UI 或调度补全
-- ⬜ 未完成：尚未实现
-- 🚫 不做：明确排除
-
-版本阶段：
-
-- `v0.1.0`：原创 Demo、3 账号、手动状态查询
-- `v0.1.1`：增加人机验证检测，但仍是“打开页面 + 等待”旧方案
-- `v0.2.0`：重做人机验证为官方 Challenge → Token → 原任务自动续提
-- `v0.3.0`：把独立版 FFmpeg-only N19 兼容实现集成进主程序
-- `v0.4.0`：将 AI 消痕升级为 AVR 1.77.0 原版完整 `SoX + Rubber Band + FFmpeg` 工具链与执行路径，并增加构建时、运行时 SHA-256 校验
-- `v0.5.0`：新增持久化歌曲列表、Suno WAV 下载、歌曲列表直达 N19 与歌词/原始 WAV/消痕 WAV 本地保存
-- `v0.5.1`：固定用户数据目录并增强旧 Session 迁移
-- `v0.5.2`：新增“排除风格 / negative_tags”
-- `v0.5.3`：已完成 AI 消痕的歌曲前后端双重跳过，避免重复处理；增强 Clerk 登录状态持久化与识别
-- `v0.5.4`：歌曲列表新增内置试听播放器，支持 Suno 在线音频、原始 WAV 和 N19 消痕 WAV 播放
-
-当前最高优先级：**先把 v0.4.0 精确 N19 链路实机跑稳，再继续自动下载、自动消痕和 Excel 批量原创。**
+- AVR 激活码 / License / 心跳 / 到期时间
+- 设备绑定与授权设备数
+- 最大批次数授权限制
+- AVR 消息中心 / 公告 / 反馈
+- AVR 远程模型配置下发
+- AVR 自有更新体系
+- 智能母带
 
 ---
 
-# 三、我们要做的全部功能
+# 二、状态说明
 
-## 3.1 Suno 账号管理
+- ✅ **已完成**：代码已经存在，主链路可实际使用/测试。
+- 🟡 **部分完成**：主体已经有，但仍缺自动化、统一性或实机稳定性补强。
+- ⬜ **未完成**：当前代码没有实现。
+- 🚫 **不做**：明确排除。
 
-| 功能 | 状态 | 说明 |
+---
+
+# 三、当前版本总览
+
+## 3.1 已经做完的核心功能
+
+| 功能 | 状态 | 当前实现 |
 |---|---|---|
-| 3 个独立 Suno 账号槽位 | ✅ | 账号 1 / 2 / 3 |
-| 每个账号独立 persistent Session | ✅ | Cookie / Session 相互隔离 |
-| 登录状态持久化 | ✅ | 登录一次后保留 |
-| 打开指定账号窗口 | ✅ | 单独打开 |
-| 检测登录状态 | ✅ | Cookie + Clerk |
-| 人机验证期间账号状态标记 | ✅ | `verificationActive` |
-| 登录成功后自动返回主界面 | ⬜ | 仍需优化 |
-| 登录成功后自动刷新状态 | ⬜ | 后续增加 |
-| 账号退出 / 清除单个账号 | ⬜ | 后续增加 |
-| 账号忙碌 / 空闲状态 | ⬜ | 批量调度需要 |
-| 自动轮流分配账号 | ⬜ | 账号 1→2→3 |
-| 单账号并发限制 | ⬜ | 防止短时间重复提交 |
-| 账号失败自动切换 | ⬜ | 后续调度 |
-
-## 3.2 原创歌曲
-
-| 功能 | 状态 | 说明 |
-|---|---|---|
-| 自定义歌名 | ✅ | 用户输入 |
-| 自定义完整歌词 | ✅ | 不强制 AI 改词 |
-| 自定义风格提示词 | ✅ | 直接传 Suno |
-| 手动选择账号 | ✅ | 1/2/3 |
-| v5.5 / v5 / v4.5+ / v4.5-all | ✅ | 已映射模型 |
+| 3 个独立 Suno 账号 | ✅ | `persist:suno-original-demo-1/2/3` |
+| 固定用户数据目录 | ✅ | `%APPDATA%\SunoOriginalStudio` |
+| 旧登录数据迁移 | ✅ | 迁移 persistent partition + `Local State` |
+| Clerk 登录状态增强识别 | ✅ | `__client` / `__client_uat` / Clerk Session / 短期 `__session` |
+| Session 主动落盘 | ✅ | Cookie/Storage flush + 正常退出前 flush |
+| 原创歌曲提交 | ✅ | `/api/generate/v2-web/` |
+| 歌名 | ✅ | 自定义 |
+| 完整歌词 | ✅ | 用户直接输入，不强制 AI 改词 |
+| 风格提示词 | ✅ | `tags` |
+| 排除风格 | ✅ | `negative_tags` |
+| 模型选择 | ✅ | v5.5 / v5 / v4.5+ / v4.5-all |
 | 男声 / 女声 | ✅ | `vocal_gender` |
 | Weirdness | ✅ | 0-100 |
 | Style Influence | ✅ | 0-100 |
-| 原创提交 | ✅ | `/api/generate/v2-web/` |
-| 返回 clip ID | ✅ | 最多记录 2 个 |
-| 刷新任务状态 | ✅ | `/api/feed/v2` |
-| 生成数量可配置 | ⬜ | 后续 |
-| Instrumental 纯音乐开关 | ⬜ | 后续 |
-| Negative Tags | ⬜ | 后续 |
-| Voice / Persona 选择 | ⬜ | AVR 有 |
-| 创建 Voice | ⬜ | AVR 有 |
-| AutoPilot / 预设模式 | ⬜ | 后续 |
-| 保存最近输入 / 草稿 | ⬜ | 后续 |
+| 官方人机验证 | ✅ | hCaptcha / Turnstile 官方组件 |
+| 验证完成自动续提 | ✅ | 官方 token 回传后重试原任务 |
+| 持久化歌曲列表 | ✅ | 每个 clip 独立记录 |
+| 一次提交的两个 Suno 版本分别记录 | ✅ | version 1 / version 2 |
+| 歌曲状态手动刷新 | ✅ | `/api/feed/v2` |
+| 歌曲状态记录 | ✅ | `generationStatus` |
+| WAV 下载状态记录 | ✅ | `wavStatus` |
+| AI 消痕状态记录 | ✅ | `deaiStatus` |
+| 本地保存状态记录 | ✅ | `localStatus` |
+| 选中歌曲下载 Suno WAV | ✅ | `convert_wav` → `wav_file` |
+| 每首歌曲独立本地目录 | ✅ | 歌名 + 版本 + clipId |
+| 保存歌词 TXT | ✅ | AI 消痕处理时保存 |
+| 保存 Suno 原始 WAV | ✅ | AI 消痕处理时保存 |
+| 保存 N19 消痕 WAV | ✅ | AI 消痕处理时保存 |
+| 自定义作品根目录 | ✅ | 默认 `文档/SunoOriginalStudio作品` |
+| AVR N19 完整链路 | ✅ | SoX → loudnorm → FFmpeg Rubber Band → 后处理 |
+| N19 工具链 SHA-256 校验 | ✅ | 构建时 + 运行时 |
+| 已消痕歌曲禁止重复处理 | ✅ | 前端禁选 + 后端强制跳过 |
+| 独立 AI 消痕页面 | ✅ | 可处理本地音频文件 |
+| 歌曲列表试听 | ✅ | v0.5.4 |
+| 播放 / 暂停 / 停止 | ✅ | 内置播放器 |
+| 播放进度拖动 | ✅ | 内置播放器 |
+| 当前时间 / 总时长 | ✅ | 内置播放器 |
+| 音量调节 | ✅ | 内置播放器 |
+| 播放本地 N19 WAV | ✅ | 优先级最高 |
+| 播放本地 Suno 原始 WAV | ✅ | 第二优先级 |
+| 播放 Suno 在线音频 | ✅ | `audio_url` / CDN MP3 fallback |
 
-## 3.3 Suno 人机验证
+## 3.2 目前部分完成的功能
 
-| 功能 | 状态 | 说明 |
+| 功能 | 状态 | 还缺什么 |
 |---|---|---|
-| `/api/c/check` 检查验证需求 | ✅ | generation precheck |
-| 读取 `captcha_version` | ✅ | 用于 provider 选择 |
-| 422 verification/captcha 识别 | ✅ | 提交后兜底 |
-| 对应账号验证窗口置顶 | ✅ | 同一 Session |
-| hCaptcha 官方链路 | ✅ | provider=1，待持续实机兼容验证 |
-| Cloudflare Turnstile 官方链路 | ✅ | provider=2，待持续实机兼容验证 |
-| 获取官方 token | ✅ | challenge callback |
-| payload 写入 `token` | ✅ | 自动回传 |
-| payload 写入 `token_provider` | ✅ | 1/2 |
-| 验证后自动续提原任务 | ✅ | 用户无需重新点击提交 |
-| 自动重试 3 次 | ✅ | 组件失败 |
-| 手动重新加载验证 | ✅ | 自动重试耗尽后 |
-| 取消验证 | ✅ | 当前任务停止 |
-| 5 分钟超时 | ✅ | 超时终止 |
-| 验证结束恢复主界面 | ✅ | 自动隐藏验证窗口 |
-| 批量时只暂停对应账号 | ⬜ | 等多账号队列实现 |
+| 登录状态持久化 | 🟡 | 主界面状态检测已增强，但 `song_library.js` 的内部取 token 逻辑仍有短期 `__session` 预检查，需要统一 |
+| 作品库 | 🟡 | 已有持久化歌曲列表和本地目录，但还没有“生成完成自动下载”的全自动作品库流程 |
+| 下载流程 | 🟡 | 选中歌曲做 AI 消痕时会自动下载 WAV；尚未实现生成完成后自动下载 |
+| 任务历史 | 🟡 | clip/song 记录已经持久化，但还没有独立“批量任务队列 / submission 任务中心” |
+| 在线试听稳定性 | 🟡 | 已有 `audio_url` 与 CDN fallback；长期应优先自动保存本地 WAV 后播放本地文件 |
+| 人机验证 | 🟡 | 完整官方链路已实现，仍需随 Suno 页面/API 变化持续兼容测试 |
 
-验证原则：只衔接 Suno / Cloudflare / hCaptcha 官方验证组件，不做验证码识别、破解、代答或绕过。
-
-## 3.4 任务中心
+## 3.3 当前还没有做的关键功能
 
 | 功能 | 状态 |
 |---|---|
-| 当前单任务展示 | ✅ |
-| 手动刷新状态 | ✅ |
-| 显示生成状态 / 时长 / 错误 | ✅ |
-| 打开 Suno 作品页 | ✅ |
-| 自动轮询生成完成 | ⬜ |
-| 多任务列表 | ⬜ |
-| 任务历史 | ⬜ |
-| 失败重试 | ⬜ |
-| 取消任务 | ⬜ |
-| 删除记录 | ⬜ |
+| 后台自动轮询生成完成 | ⬜ |
+| 程序启动后自动恢复轮询 | ⬜ |
+| 生成完成后自动下载 Suno WAV | ⬜ |
+| 生成完成后自动保存歌词 + WAV | ⬜ |
+| 下载完成后自动进入 N19 | ⬜ |
+| 自动化链路开关 | ⬜ |
+| Excel 批量原创 | ⬜ |
+| 多任务提交队列 | ⬜ |
+| 3 账号自动轮流分配 | ⬜ |
+| 单账号 busy 锁 | ⬜ |
+| 每首提交间隔控制 | ⬜ |
 | checkpoint 防重复提交 | ⬜ |
-| 重启后恢复 | ⬜ |
-| 按账号筛选 | ⬜ |
+| 程序重启后恢复批量队列 | ⬜ |
+| 失败任务重试 | ⬜ |
+| 账号失败后切换其他账号 | ⬜ |
+| 账号退出 / 清除单个账号 | ⬜ |
+| 登录成功自动关闭账号窗口并返回主界面 | ⬜ |
+| 登录成功自动推送账号状态变化 | ⬜ |
+| Instrumental 纯音乐开关 | ⬜ |
+| Voice / Persona 选择 | ⬜ |
+| 创建 Voice / Persona | ⬜ |
+| 生成版本数量配置 | ⬜ |
+| 保存原创输入草稿 / 最近参数 | ⬜ |
+| 结果 Excel 导出 | ⬜ |
 
-## 3.5 作品库与下载
+---
 
-| 功能 | 状态 |
-|---|---|
-| 获取生成结果 audio_url | 🟡 |
-| 自动下载 Suno 音频 | ⬜ |
-| 本地作品库 | ⬜ |
-| 保存歌词 / 风格 / 封面 / 元数据 | ⬜ |
-| 自定义作品目录 | ⬜ |
-| 按歌名创建目录 | ⬜ |
-| 避免重复下载 | ⬜ |
-| 生成完成后自动送入 AI 消痕 | ⬜ |
+# 四、模块详细状态
 
-## 3.6 AI 消痕 · AVR N19 完整链路
-
-`v0.4.0` 起，FFmpeg-only 兼容实现不再作为主执行链。当前主链路改为对 AVR 1.77.0 中 N19 模块的工具链、阶段顺序和参数进行精确对齐。
+## 4.1 Suno 账号管理
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| 主程序独立“AI 消痕”页面 | ✅ | 与原创页切换 |
-| 多文件选择 | ✅ | WAV/MP3/FLAC/M4A/AAC/OGG/WMA |
-| 批量顺序处理 | ✅ | 一次处理多个文件 |
-| 自定义输出目录 | ✅ | 默认源文件旁 `AI消痕输出` |
-| 任务取消 | ✅ | 可停止当前子进程 |
-| 实时处理日志 | ✅ | 主界面显示阶段 |
-| 打开输出目录 | ✅ | 一键打开 |
-| AVR SoX 14.4.2 工具链 | ✅ | 与 AVR 1.77.0 中提取文件哈希对齐 |
-| AVR FFmpeg v7.1 工具链 | ✅ | `ffmpeg-win-x86_64-v7.1.exe` |
-| Rubber Band filter | ✅ | `--enable-librubberband`，节点 9 使用 `rubberband=pitch=0.975` |
-| 构建时工具链 SHA-256 校验 | ✅ | 不匹配则构建失败 |
-| 运行时工具链 SHA-256 校验 | ✅ | 不匹配则拒绝标记/执行 exact 模式 |
-| 解码阶段 | ✅ | 44.1kHz / Stereo / PCM16 |
-| SoX 节点 1 | ✅ | 原参数、原顺序 |
-| 节点间 loudnorm | ✅ | `I=-15:TP=-1.5:LRA=11` |
-| FFmpeg 节点 9 | ✅ | 48kHz / Rubber Band / PCM24 |
-| 组合后处理 | ✅ | 原 EQ / compressor / limiter |
-| Metadata 清理 | ✅ | 节点 9 与最终输出 `-map_metadata -1` |
-| 最终输出 | ✅ | 48kHz / PCM16 / Stereo WAV |
-| AVR 输出命名规则 | ✅ | `-消痕-N19`，冲突追加 UUID 6 位 |
-| AVR 1GB 输入限制 | ✅ | >1GB 拒绝处理 |
-| 中间文件自动清理 | ✅ | temp `deai-xxxxxxxxxx` |
-| 自动处理 Suno 下载结果 | ⬜ | 等自动下载功能后串联 |
+| 账号 1/2/3 | ✅ | 三个独立槽位 |
+| 独立 persistent partition | ✅ | 不共享 Cookie |
+| 固定 profile 目录 | ✅ | `%APPDATA%\SunoOriginalStudio` |
+| 旧版本 profile 迁移 | ✅ | 包含 `Local State` 与三个 partitions |
+| Cookie 主动 flush | ✅ | 登录 Cookie 变化后落盘 |
+| Storage 主动 flush | ✅ | 定时与退出前落盘 |
+| Clerk 长登录状态识别 | ✅ | 避免只看短期 `__session` |
+| 打开账号窗口 | ✅ | 对应账号 partition |
+| 当前账号手动刷新状态 | ✅ | 主界面按钮 |
+| 登录成功自动返回 | ⬜ | 下一阶段 |
+| 登录状态实时事件 | ⬜ | 下一阶段 |
+| 单账号退出 | ⬜ | 下一阶段 |
+| 账号 busy / idle | ⬜ | 批量调度用 |
+| Round-robin 自动分配 | ⬜ | 批量调度用 |
 
-### 3.6.1 精确阶段顺序
+### 当前已知问题：账号状态逻辑还没有完全统一
+
+`bootstrap.js/main.js` 的登录检测已经使用 Clerk 长期状态，但 `song_library.js` 当前 `hiddenAuthToken()` 仍先检查短生命周期 `__session` Cookie。
+
+这意味着：
+
+```text
+主界面可能显示“已登录”
+↓
+Clerk 长期 Session 仍然有效
+↓
+短期 __session 暂时不存在/刚过期
+↓
+song_library 内部请求 WAV 时可能错误提示“账号未登录”
+```
+
+这是 **v0.5.5 的第一优先级 Bug**，必须把所有 Suno token 获取逻辑统一成一套。
+
+---
+
+## 4.2 原创歌曲
+
+| 参数 / 功能 | 状态 | 实现 |
+|---|---|---|
+| 歌名 | ✅ | `title` |
+| 完整歌词 | ✅ | `prompt` |
+| 风格 | ✅ | `tags` |
+| 排除风格 | ✅ | `negative_tags` |
+| 模型 | ✅ | `mv` |
+| 人声性别 | ✅ | `vocal_gender` |
+| Weirdness | ✅ | `weirdness_constraint` |
+| Style Influence | ✅ | `style_weight` |
+| 手动账号选择 | ✅ | slot 1/2/3 |
+| 提交原创 | ✅ | `POST /api/generate/v2-web/` |
+| 两个 clip 写入歌曲列表 | ✅ | 独立版本 |
+| Instrumental | ⬜ | 后续 |
+| Persona | ⬜ | 后续 |
+| 生成版本数 | ⬜ | 后续 |
+| AutoPilot / Preset | ⬜ | 后续可选 |
+
+模型映射：
+
+```text
+v5.5       → chirp-fenix
+v5         → chirp-crow
+v4.5+      → chirp-bluejay
+v4.5-all   → chirp-bluejay
+```
+
+---
+
+## 4.3 官方人机验证
+
+| 功能 | 状态 |
+|---|---|
+| `/api/c/check` 预检查 | ✅ |
+| `captcha_version` provider 判断 | ✅ |
+| 422 verify/captcha 识别 | ✅ |
+| hCaptcha 官方组件 | ✅ |
+| Cloudflare Turnstile 官方组件 | ✅ |
+| 官方 callback token | ✅ |
+| `token_provider` | ✅ |
+| 原任务自动续提 | ✅ |
+| 自动重试 | ✅ |
+| 手动重载 | ✅ |
+| 取消 | ✅ |
+| 5 分钟超时 | ✅ |
+| 批量队列只暂停对应账号 | ⬜ |
+
+原则：只衔接 Suno / Cloudflare / hCaptcha 官方验证，不破解、不代答、不绕过。
+
+---
+
+## 4.4 歌曲列表 / 作品记录
+
+当前歌曲列表是项目的核心数据层，文件保存于：
+
+```text
+%APPDATA%\SunoOriginalStudio\song-library-v1.json
+```
+
+每个 clip 主要记录：
+
+```text
+clipId
+submissionId
+version
+title
+lyrics
+stylePrompt
+negativeStyle
+slot
+modelVersion
+vocalGender
+weirdness
+styleInfluence
+submittedAt
+generationStatus
+audioUrl
+duration
+wavStatus
+deaiStatus
+localStatus
+localDir
+sourceWavPath
+processedWavPath
+lyricsPath
+lastError
+updatedAt
+```
+
+状态：
+
+| 功能 | 状态 |
+|---|---|
+| 提交成功自动入列表 | ✅ |
+| 每个版本单独一行 | ✅ |
+| 持久化重启保留 | ✅ |
+| 手动刷新 Suno 状态 | ✅ |
+| 显示账号 | ✅ |
+| 显示生成状态 | ✅ |
+| 显示 WAV 状态 | ✅ |
+| 显示 N19 状态 | ✅ |
+| 显示本地状态 | ✅ |
+| 打开 Suno 页面 | ✅ |
+| 打开本地歌曲目录 | ✅ |
+| 选中歌曲 N19 | ✅ |
+| 已 N19 歌曲自动锁定 | ✅ |
+| 自动后台刷新 | ⬜ |
+| 搜索 / 筛选 | ⬜ |
+| 删除列表记录 | ⬜ |
+| 按 submission 聚合 | ⬜ |
+
+---
+
+## 4.5 歌曲列表试听播放器（v0.5.4）
+
+每首已生成歌曲有“试听”按钮。
+
+播放器支持：
+
+- ✅ 播放 / 暂停
+- ✅ 停止
+- ✅ 拖动进度
+- ✅ 当前时间 / 总时长
+- ✅ 音量
+- ✅ 同一时间只播放一首
+
+播放源优先级：
+
+```text
+1. 已存在的 N19 消痕 WAV
+2. 已存在的 Suno 原始 WAV
+3. 歌曲列表中的 Suno audio_url
+4. https://cdn1.suno.ai/{clipId}.mp3 兜底
+```
+
+试听只负责播放：
+
+- 不自动下载
+- 不自动触发 N19
+- 不改变歌曲处理状态
+
+---
+
+## 4.6 Suno WAV 下载与本地目录
+
+当前是“**用户选中歌曲做 AI 消痕时触发下载**”，还不是“生成完成立即自动下载”。
+
+已完成：
+
+```text
+POST /api/gen/{clipId}/convert_wav/
+↓
+GET /api/gen/{clipId}/wav_file/
+↓
+获得 Suno WAV URL
+↓
+下载 WAV
+↓
+写入歌曲目录
+```
+
+单首目录示例：
+
+```text
+SunoOriginalStudio作品
+└─ 歌名-V1-a1b2c3d4
+   ├─ 歌词.txt
+   ├─ 歌名-Suno原始.wav
+   └─ 歌名-消痕-N19.wav
+```
+
+| 功能 | 状态 |
+|---|---|
+| 选择根目录 | ✅ |
+| 单歌独立目录 | ✅ |
+| 下载 Suno WAV | ✅（按需） |
+| 保存歌词 TXT | ✅（按需） |
+| 保存原始 WAV | ✅（按需） |
+| 保存 N19 WAV | ✅（按需） |
+| 生成完成自动下载 | ⬜ |
+| 自动保存歌词/音频 | ⬜ |
+| 自动避免重复下载 | 🟡 | 已有路径/状态数据，但还需要在自动下载模块里做完整幂等判断 |
+| 封面保存 | ⬜ |
+| metadata JSON | ⬜ |
+
+---
+
+## 4.7 AI 消痕 · AVR 1.77.0 N19
+
+当前主执行链已不是 FFmpeg-only 兼容实现。
+
+主链：
 
 ```text
 源音频
 ↓
-00-decode.wav
-FFmpeg：Stereo / 44100 Hz / PCM16
+FFmpeg 解码 → 44.1kHz / Stereo / PCM16
 ↓
-01-scheme1.wav
 SoX 节点 1
 ↓
-02-norm.wav
-FFmpeg loudnorm：I=-15:TP=-1.5:LRA=11
-Stereo / 44100 Hz / PCM16
+FFmpeg loudnorm
 ↓
-03-scheme9.wav
-FFmpeg 节点 9：Rubber Band pitch=0.975
-Stereo / 48000 Hz / PCM24
-metadata stripped
+FFmpeg 节点 9（真实 Rubber Band pitch=0.975）
 ↓
-最终 WAV
 组合后处理
-Stereo / 48000 Hz / PCM16
-metadata stripped
+↓
+48kHz / PCM16 / Stereo WAV
 ```
 
-### 3.6.2 SoX 节点 1
+关键状态：
 
-```text
-highpass 28
-pitch -22
-treble -0.20 8500
-treble 0 7000
-treble -1.5 10000
-treble -2.5 12000
-lowpass 15000
-reverb 15 40 40 45
-gain -n -1.8
-rate 44100
-dither -s
-```
+| 功能 | 状态 |
+|---|---|
+| AVR SoX 14.4.2 文件集 | ✅ |
+| AVR FFmpeg v7.1 文件 | ✅ |
+| `librubberband` | ✅ |
+| SoX 节点 1 | ✅ |
+| 节点间 loudnorm | ✅ |
+| FFmpeg 节点 9 | ✅ |
+| 组合后处理 | ✅ |
+| 48k PCM16 最终输出 | ✅ |
+| 构建时 SHA-256 检查 | ✅ |
+| 运行时 SHA-256 检查 | ✅ |
+| 1GB 输入限制 | ✅ |
+| 临时文件清理 | ✅ |
+| 手动多文件处理 | ✅ |
+| 歌曲列表直接 N19 | ✅ |
+| 已完成 N19 强制跳过 | ✅ |
+| 生成完成自动 N19 | ⬜ |
 
-### 3.6.3 FFmpeg 节点 9
+完整参数、第三方二进制 SHA-256 与 reproducibility 说明见：`THIRD_PARTY_N19.md`。
 
-```text
-rubberband=pitch=0.975,
-equalizer=f=80:g=4.0:width_type=h:width=80,
-equalizer=f=150:g=3.0:width_type=h:width=100,
-equalizer=f=300:g=-1.5:width_type=h:width=200,
-equalizer=f=1500:g=-1.0:width_type=h:width=400,
-equalizer=f=4000:g=3.5:width_type=h:width=2000,
-equalizer=f=8000:g=1.8:width_type=h:width=4000,
-aecho=0.55:0.4:35|45:0.12|0.08,
-volume=2.0,
-highpass=f=45,
-acompressor=threshold=-18dB:ratio=2.0:attack=10:release=120:makeup=1.5,
-volume=2.0dB,
-alimiter=limit=0.97
-```
-
-### 3.6.4 组合后处理
-
-```text
-highpass=f=28,
-equalizer=f=120:g=0.25:width_type=h:width=100,
-equalizer=f=1800:g=0.20:width_type=h:width=1200,
-equalizer=f=7200:g=-0.18:width_type=h:width=3800,
-acompressor=threshold=-19dB:ratio=1.18:attack=24:release=210:makeup=1,
-alimiter=limit=0.96
-```
-
-### 3.6.5 “字节级复刻”的准确含义
-
-v0.4.0 对齐的是：**同一第三方二进制工具链 + 同一阶段顺序 + 同一参数 + 同一中间采样率/位深/编码格式**。
-
-AVR 原链路本身包含 SoX `dither -s`。Dither 会引入噪声，因此即使使用完全相同的二进制和命令，两次独立运行的最终 WAV 文件 SHA-256 也不保证相同。不能把“同一执行链路”错误宣传成“每次输出文件 hash 必然相同”。
-
-完整工具链哈希与第三方说明见 `THIRD_PARTY_N19.md`。
-
-## 3.7 Excel 批量原创
-
-全部未完成，计划支持：Excel 导入、歌名/歌词/风格/账号/模型/人声字段、数据校验、预览、3 账号轮流执行、账号验证时仅暂停对应账号、逐首提交、自定义间隔、checkpoint、重启恢复、结果 Excel、自动下载。
-
-## 3.8 后续可选
-
-- ⬜ 翻唱 / 使用原词 / AI 改词
-- ⬜ 本地参考音频上传
-- ⬜ 歌曲改词
-- ⬜ Voice 管理
-- ⬜ AI 写歌词 / 主题推荐
-- 🚫 智能母带
+注意：AVR 原链路包含 SoX `dither -s`，因此“精确复刻”指工具链、阶段、参数和中间格式精确对齐，不代表每次独立执行的最终 WAV SHA-256 必然相同。
 
 ---
 
-# 四、明确不做的 AVR 功能
+## 4.8 任务中心 / 自动化队列
 
-- 🚫 激活码、License 激活/续期/心跳
-- 🚫 授权到期、设备绑定、最大设备数、最大批次数授权限制
-- 🚫 消息中心、公告、消息已读、用户反馈
-- 🚫 AVR 服务端模型配置下发
-- 🚫 AVR 自有版本更新体系
-- 🚫 智能母带
+目前没有真正的后台任务队列。
+
+| 功能 | 状态 |
+|---|---|
+| 当前单任务展示 | ✅ |
+| clip 持久化列表 | ✅ |
+| 手动刷新 | ✅ |
+| 后台自动轮询 | ⬜ |
+| 多 submission 队列 | ⬜ |
+| queued/submitting/generating/downloading 状态机 | ⬜ |
+| 失败重试 | ⬜ |
+| 暂停/继续 | ⬜ |
+| 取消未提交任务 | ⬜ |
+| checkpoint | ⬜ |
+| 重启恢复 | ⬜ |
+| 账号 busy 锁 | ⬜ |
 
 ---
 
-# 五、AVR Suno Cover 1.77.0 详细功能列表
+## 4.9 Excel 批量原创
 
-以下来自对 AVR 1.77.0 Electron 客户端、preload IPC、renderer bundle、main process 与内置 engine 的静态分析。它表示 AVR 具备/预留的能力，不表示本项目全部复制。
+当前：**全部未实现。**
 
-## 5.1 主导航
-
-AVR 主界面包含：首页、翻唱、原创、歌曲改词、任务中心、作品库、AI 消痕、智能母带。
-
-## 5.2 首页
-
-- 软件运行状态
-- Suno 账号状态
-- 任务概览
-- 最近作品 / 最近任务
-- 功能入口
-- 授权信息
-- 消息 / 公告入口
-
-授权、公告、消息类功能本项目不做。
-
-## 5.3 Suno 账号管理
-
-AVR 使用 3 个持久化 Session：
+计划 Excel 字段：
 
 ```text
-persist:suno-account-1
-persist:suno-account-2
-persist:suno-account-3
+歌名
+歌词
+风格
+排除风格
+账号（可选）
+模型
+人声
+Weirdness
+Style Influence
+自动AI消痕（可选）
 ```
 
-能力：打开登录窗口、检查状态、获取 Auth Token、删除账号、Session 隔离与持久化、执行任务绑定账号、账号状态保护、Voice 列表、Voice 创建、人机验证状态。
+计划行为：
 
-主要 IPC：
+- 一次导入多首
+- 校验空歌名 / 空歌词 / 非法数值
+- 导入预览
+- 可固定账号，也可 1→2→3 轮流
+- 每账号最多一个正在提交的原创任务
+- 每首可设置提交间隔
+- 某账号进入官方验证时，只暂停该账号
+- 其他账号继续队列
+- 成功后写入歌曲列表
+- checkpoint 防止程序重启后重复提交
+- 失败项可重试
+- 最终导出结果 Excel
+
+---
+
+# 五、当前已知问题 / 技术债
+
+按优先级排序：
+
+### P0-1：Suno token 获取逻辑没有统一
+
+主界面登录状态已经改为 Clerk-aware，但 `song_library.js` 仍有 `__session` 的短期 Cookie 前置判断。
+
+**必须先修这个，再继续扩大自动下载。**
+
+### P0-2：歌曲状态依赖手动刷新
+
+用户提交多首后，当前要点击“刷新 Suno 状态”才能更新歌曲列表。
+
+### P0-3：下载和 N19 仍是手动触发
+
+目前必须：
 
 ```text
-getEngineStatus
+选中歌曲
+→ 点击“对选中歌曲 AI 消痕”
+→ 下载 WAV
+→ N19
+```
+
+还没有：
+
+```text
+生成完成
+→ 自动下载 WAV
+→ 自动保存歌词
+→ 可选自动 N19
+```
+
+### P1-1：没有批量原创任务队列
+
+现在可以手动连续提交多首，但不能一次导入 10/100 首让软件自动跑。
+
+### P1-2：没有完整 checkpoint / 重启恢复
+
+歌曲列表本身会保留，但未提交/等待提交的批量任务还没有持久化状态机。
+
+---
+
+# 六、接下来做什么：明确开发顺序
+
+## v0.5.5 — 统一账号 Session / Auth Token（下一步，P0）
+
+### 目标
+
+彻底解决“主界面显示已登录，但 WAV/歌曲列表接口又说未登录”的不一致。
+
+### 怎么做
+
+新增共享模块，例如：
+
+```text
+suno_session.js
+```
+
+统一提供：
+
+```text
+partitionFor(slot)
+getAccountSession(slot)
+ensureSunoWindow(slot)
+getAuthToken(slot)
+getApiHeaders(slot)
+getAccountStatus(slot)
+flushAccountSession(slot)
+```
+
+实现原则：
+
+1. **不再要求 `__session` 必须预先存在。**
+2. 优先在对应 persistent partition 打开隐藏 Suno 页面。
+3. 等待 `window.Clerk.session` 恢复。
+4. 调 `Clerk.session.getToken()` 获取新 token。
+5. 只有 Clerk 确认没有 Session，才认为账号真的退出。
+6. `main.js`、`song_library.js`、以后批量队列全部调用同一个模块。
+7. 删除重复的 token / header 实现，避免以后再出现两套判断标准。
+8. 登录成功后立即 flush Cookie/Storage。
+9. 增加账号状态事件：`account:state-changed`。
+10. 登录成功后自动刷新主界面状态，并可自动隐藏登录窗口。
+
+### v0.5.5 验收标准
+
+- 登录一次，关闭程序，再开仍显示登录。
+- 等几分钟让短期 `__session` 过期，主界面仍能正确识别 Clerk Session。
+- 此时歌曲列表刷新、WAV 下载、AI 消痕仍可正常取 token。
+- 账号 1/2/3 相互隔离。
+- 一个账号退出不会影响另外两个。
+
+---
+
+## v0.5.6 — 自动轮询 + 自动下载 + 可选自动 N19（P0）
+
+### 目标
+
+把当前手动链路变成：
+
+```text
+提交原创
+↓
+歌曲列表
+↓
+后台自动轮询
+↓
+生成完成
+↓
+自动下载 Suno WAV
+↓
+自动保存歌词
+↓
+[可选] 自动 AVR N19
+↓
+最终本地作品目录
+```
+
+### 怎么做
+
+新增 `song_pipeline.js` / `job_manager.js`：
+
+1. 启动时扫描歌曲列表中：
+   - `submitted`
+   - `queued`
+   - `streaming`
+   - `generating`
+   等未完成记录。
+2. 按账号分组调用 `/api/feed/v2`。
+3. 默认约 5 秒轮询一次；连续失败使用退避，不高频轰接口。
+4. `complete` 后停止该 clip 的生成轮询。
+5. 如果“自动下载 WAV”开启：
+   - 检查 `wavStatus`
+   - 检查目标文件是否已存在
+   - 已存在则直接标记，不重复下载
+   - 否则执行 `convert_wav → wav_file → download`
+6. 写 `歌词.txt`。
+7. 如果“生成完成自动 AI 消痕”开启：
+   - 仅处理 `deaiStatus != complete`
+   - 复用现有 N19 后端
+   - 继续保留 v0.5.3 的后端幂等保护
+8. 每一步写入 `song-library-v1.json`，程序崩溃/重启后从状态继续。
+
+建议新增状态：
+
+```text
+generation: submitted / generating / complete / failed
+wav: not_downloaded / waiting / downloading / downloaded / error
+deai: not_processed / waiting / processing / complete / error
+local: not_saved / saving / saved / error
+```
+
+### v0.5.6 UI
+
+歌曲列表增加：
+
+```text
+☑ 生成完成后自动下载 WAV
+☑ 下载完成后自动 AI 消痕
+```
+
+并显示后台自动化是否正在运行。
+
+---
+
+## v0.6.0 — Excel 批量原创 + 3 账号调度（P1）
+
+### 目标
+
+一次导入多首，软件自动逐首提交。
+
+### 怎么做
+
+新增持久化批量队列，例如：
+
+```text
+batch-jobs-v1.json
+```
+
+每个任务记录：
+
+```text
+id
+sourceRow
+title
+lyrics
+stylePrompt
+negativeStyle
+preferredSlot
+assignedSlot
+modelVersion
+vocalGender
+weirdness
+styleInfluence
+status
+attempts
+clipIds
+lastError
+createdAt
+updatedAt
+```
+
+任务状态建议：
+
+```text
+queued
+waiting_account
+submitting
+waiting_verification
+submitted
+generating
+downloading
+cleaning
+completed
+failed
+cancelled
+```
+
+调度规则：
+
+1. 默认账号 1→2→3 round-robin。
+2. 每个账号同一时间只允许一个“提交动作”。
+3. 一个账号要求人机验证时，锁住该账号。
+4. 另外两个账号仍可继续提交。
+5. 提交成功后立即保存 `clipIds`，避免重启重复提交。
+6. 提交失败区分：
+   - 账号掉线
+   - 额度不足
+   - 人机验证
+   - 网络错误
+   - Suno 业务错误
+7. 网络错误可有限次数重试；业务错误不无限重试。
+8. 程序重启从 `batch-jobs-v1.json` 恢复。
+9. 成功的 clip 同步进入现有歌曲列表，不另造作品库。
+
+---
+
+## v0.6.1 — 批量任务体验补全（P1）
+
+计划：
+
+- 暂停 / 继续队列
+- 重试失败项
+- 删除未提交任务
+- 按账号筛选
+- 按状态筛选
+- 结果 Excel 导出
+- 每首提交间隔设置
+- 批次统计
+- 账号额度不足自动停止该账号
+
+---
+
+## v0.7.x — 可选增强（P2）
+
+优先级低于上面主线：
+
+- Instrumental 纯音乐开关
+- Voice / Persona 列表
+- 创建 Voice
+- 搜索 / 筛选歌曲列表
+- 封面保存
+- metadata JSON
+- 歌曲删除/归档
+- 预设参数模板
+- 原创输入草稿
+
+---
+
+# 七、AVR 1.77.0 功能对照
+
+AVR 主导航包含：
+
+```text
+首页
+翻唱
+原创
+歌曲改词
+任务中心
+作品库
+AI消痕
+智能母带
+```
+
+本项目当前只重点复用/参考：
+
+| AVR 能力 | 本项目 |
+|---|---|
+| 3 个 Suno Session | ✅ 已实现 |
+| 原创 | ✅ 已实现核心参数 |
+| 官方人机验证衔接 | ✅ 已实现 |
+| 任务中心 | 🟡 只有歌曲列表，缺完整队列 |
+| 作品库 | 🟡 已有歌曲列表/本地目录，缺全自动下载 |
+| AI 消痕 N19 | ✅ 完整主链实现 |
+| Voice / Persona | ⬜ 后续 |
+| 翻唱 | ⬜ 可选，不是当前主线 |
+| 歌曲改词 | ⬜ 可选，不是当前主线 |
+| 智能母带 | 🚫 不做 |
+| License / 授权 | 🚫 不做 |
+| 公告 / 消息 / 反馈 | 🚫 不做 |
+
+AVR 账号相关 IPC 参考：
+
+```text
 getSunoState
 openSunoLogin
 removeSunoAccount
@@ -327,25 +783,7 @@ listSunoVoices
 createSunoVoice
 ```
 
-## 5.4 AVR 原创
-
-参数包括：歌名、brief、自带歌词、AI 歌词、主题、风格、模型、男/女声、Voice/Persona、Weirdness、Style Influence、预设、AutoPilot、多个生成版本。
-
-模型映射观察到：
-
-```text
-v5.5 → chirp-fenix
-v5   → chirp-crow
-v4.5+ / v4.5-all → chirp-bluejay
-```
-
-核心接口：
-
-```text
-POST https://studio-api-prod.suno.com/api/generate/v2-web/
-```
-
-核心 payload 包含：
+AVR 原创核心 payload 已确认包含：
 
 ```text
 token
@@ -362,69 +800,7 @@ persona_id
 transaction_uuid
 ```
 
-metadata 中已观察到 `weirdness_constraint`、`style_weight`、`vocal_gender`、`create_session_token` 等。
-
-主要 IPC：`suggestOriginalTheme`、`createOriginalBatch`、`listLatestOriginalJobs`。
-
-## 5.5 AVR 翻唱
-
-支持：批量翻唱、歌曲信息、素材识别、参考音频、使用原词、AI 改词、纯音乐、改词主题、语言、风格、Weirdness、Style Influence、Audio Influence、模型、性别、Voice、多个版本、预设、AutoPilot、素材确认、歌词确认、失败重试、结果下载。
-
-主要 IPC：
-
-```text
-suggestRewriteTheme
-createBatch
-getMaterialReview
-confirmMaterials
-getLyricsReview
-confirmLyrics
-regenerateLyrics
-attachAudioToJob
-```
-
-音频选择：MP3/WAV/FLAC/M4A/AAC/OGG；文本导入见 CSV/TXT。
-
-## 5.6 AVR 歌曲改词
-
-Source Song 字段包括：accountId、songId、title、artist、duration、lyrics、local/Suno source。
-
-歌词片段结构：id、text、startS、endS、sectionLabel、success。
-
-任务状态：
-
-```text
-queued
-loading_lyrics
-ready
-submitting
-generating_candidates
-awaiting_choice
-committing
-downloading
-completed
-failed
-cancelled
-```
-
-主要 IPC：
-
-```text
-listSongEditJobs
-listSunoEditableSongs
-loadSongEditLyrics
-createSongEdit
-chooseSongEditCandidate
-cancelSongEdit
-retrySongEdit
-deleteSongEdit
-rewriteSongEditLyrics
-onSongEditChanged
-```
-
-## 5.7 AVR 任务中心
-
-通用任务状态：
+AVR 通用任务状态参考：
 
 ```text
 queued
@@ -444,256 +820,87 @@ failed
 cancelled
 ```
 
-主要 IPC：
-
-```text
-listLatestJobs
-listLatestOriginalJobs
-listRecentJobs
-listAllJobs
-retryJob
-cancelJob
-deleteJob
-```
-
-## 5.8 AVR 作品库
-
-主要 IPC：
-
-```text
-listCompletedWorks
-openWorksDirectory
-```
-
-能力：已完成作品列表、本地作品目录、打开目录、下载结果、保存歌曲相关文件。
-
-## 5.9 AVR Suno 人机验证 / 风控
-
-预检：
-
-```text
-POST /api/c/check
-body: {"ctype":"generation"}
-```
-
-读取 `required` 与 `captcha_version`。
-
-provider 映射：
-
-```text
-captcha_version = 1 → hCaptcha → token_provider = 1
-captcha_version = 2/其他 → Cloudflare Turnstile → token_provider = 2
-```
-
-若 `/api/generate/v2-web/` 返回 422 且包含 verify/verification/captcha，人机验证链路会启动。
-
-Turnstile 使用官方 Cloudflare challenge；hCaptcha 使用 Suno 对应的官方组件。验证后得到 token，再以相同歌名、歌词、风格、模型等参数自动续提原任务。
-
-本项目只衔接官方 challenge，不识别、破解、代答或绕过验证码。
-
-## 5.10 AVR Voice / Persona
-
-已确认 IPC：
-
-```text
-listSunoVoices
-createSunoVoice
-```
-
-能力：获取 Voice/Persona、创建 Voice、原创/翻唱任务选择 Voice。
-
-## 5.11 AVR AI 消痕 N19
-
-AVR 1.77.0 的 AI 消痕不是神经网络模型，而是固定 DSP 链路。
-
-原模块 docstring 明确描述：
-
-```text
-AI 消痕：N-1-9（简单）原版链路。
-节点 1（SoX）→ 节点间响度对齐 → 节点 9（FFmpeg）→ 组合后处理 → 48k PCM16 WAV
-```
-
-已确认 AVR engine 中实际捆绑：
-
-- SoX 14.4.2 Windows 工具链
-- `ffmpeg-win-x86_64-v7.1.exe`
-- 该 FFmpeg 编译配置包含 `--enable-librubberband`
-
-v0.4.0 已按同一工具链哈希、同一命令阶段、同一参数和中间格式实现。
-
-AVR AI 消痕主要 IPC：
-
-```text
-listDeaiJobs
-enqueueDeaiJobs
-clearFinishedDeaiJobs
-getDeaiOutputDir
-openDeaiDirectory
-onDeaiChanged
-```
-
-## 5.12 AVR 智能母带
-
-AVR 提供 dynamic / balanced / loud 等母带预设，并有任务列表、重试、重新母带、输出目录等 IPC。
-
-主要 IPC：
-
-```text
-listMasteringJobs
-enqueueMasteringJobs
-retryMasteringJob
-remasterAsNewVersion
-clearFinishedMasteringJobs
-getMasteringOutputDir
-openMasteringDirectory
-onMasteringChanged
-```
-
-本项目明确不做智能母带。
-
-## 5.13 AVR 设置与窗口
-
-设置 IPC：`getSettings`、`saveSettings`、`selectWorksDirectory`。
-
-窗口 IPC：
-
-```text
-getAppInfo
-openWorksDirectory
-minimizeWindow
-toggleMaximizeWindow
-isWindowMaximized
-closeWindow
-onWindowMaximizedChanged
-```
-
-## 5.14 AVR License / 授权体系
-
-AVR 包含激活码、License 激活/续期/心跳、设备 ID、设备名、最大设备数、最大歌曲批量数、授权时间等。
-
-观察到授权时长：`1d`、`7d`、`30d`、`90d`、`365d`、`permanent`、`custom`。
-
-观察到状态：`active`、`expired`、`suspended`、`revoked`、`device_unbound`、`deleted`。
-
-本项目全部不做。
-
-## 5.15 AVR 消息 / 公告 / 反馈
-
-IPC：`listInbox`、`markInboxRead`、`sendFeedback`。本项目全部不做。
-
-## 5.16 AVR 远程模型配置
-
-AVR 存在服务端下发 `modelEndpoint`、`modelName`、`modelApiKey` 等配置，主要服务 AI 改词/主题生成。本项目当前以用户自带歌词为主，不依赖 AVR 后端，也不复用该配置体系。
-
 ---
 
-# 六、开发优先级
-
-## P0：原创核心 + 精确 N19
-
-1. ✅ 3 个 Suno 独立账号
-2. ✅ 自定义歌名 / 歌词 / 风格
-3. ✅ 模型 / 人声 / Weirdness / Style Influence
-4. ✅ 原创提交
-5. ✅ 官方人机验证 Challenge → Token → 自动续提代码链路
-6. ✅ AVR N19 原版 SoX + Rubber Band + FFmpeg 精确执行路径
-7. ✅ 构建/运行时 N19 二进制哈希校验
-8. ⬜ 自动轮询生成完成
-9. ⬜ 自动下载
-10. ⬜ 生成完成后自动送入 N19
-
-## P1：批量原创
-
-1. Excel 导入
-2. 多任务队列
-3. 3 账号轮流执行
-4. 单账号忙碌锁
-5. 验证时只暂停对应账号
-6. checkpoint
-7. 重启恢复
-8. 自动下载
-9. 自动 N19 消痕
-10. 结果 Excel
-
-## P2：体验完善
-
-1. 登录完成自动返回
-2. 账号退出 / 重登
-3. 本地作品库
-4. 下载目录设置
-5. 任务历史
-6. 失败重试
-7. Voice / Persona
-
-## P3：可选扩展
-
-1. 翻唱
-2. 歌曲改词
-3. AI 主题推荐
-4. AI 写歌词
-
-智能母带不进入开发计划。
-
----
-
-# 七、版本记录
+# 八、版本记录
 
 ## v0.1.0
 
 - 初版 Electron Demo
-- 3 个 Suno 登录槽位
-- 自定义歌名、歌词、风格
+- 3 个账号槽位
+- 自定义歌名 / 歌词 / 风格
 - 原创提交
-- 任务状态查询
+- 手动任务状态查询
 
 ## v0.1.1
 
-- 增加人机验证需求检测
-- 增加验证窗口置顶
-- 增加验证后自动恢复尝试
-- 验证尚不是完整 token 链路
+- 增加验证需求检测
+- 验证窗口置顶
+- 仍不是完整 token 链路
 
 ## v0.2.0
 
-- `/api/c/check` 的 `captcha_version` 参与 provider 选择
-- 接入 hCaptcha / Turnstile 官方 challenge
-- challenge token 自动写入原创请求
-- 422 验证错误自动进入 challenge 并重发原任务
-- 自动重试、手动重载、取消和 5 分钟超时
+- `/api/c/check`
+- hCaptcha / Turnstile 官方 Challenge
+- 官方 token 自动写回原创请求
+- 422 验证后自动续提
 
 ## v0.3.0
 
-- 集成 AI 消痕页面
-- FFmpeg-only N19 兼容 DSP 实现
-- 多文件批量处理
-- 自定义输出目录、取消、日志、打开目录
-- 48kHz PCM16 Stereo WAV 输出
+- 主程序集成 AI 消痕页面
+- 初始为 FFmpeg-only N19 兼容实现
 
 ## v0.4.0
 
-- 从 AVR 1.77.0 engine 中确认 N19 原版工具链与准确阶段
-- 使用与 AVR 中一致的 SoX 14.4.2 文件集
-- 使用与 AVR 中一致的 imageio FFmpeg v7.1 Windows x64 二进制
-- 确认 FFmpeg 含 `librubberband`
-- SoX 节点 1 参数与执行顺序完整对齐
-- 节点间 loudnorm 完整对齐
-- FFmpeg 节点 9 改为真实 `rubberband=pitch=0.975`
-- 节点 9 输出 48kHz / PCM24，与 AVR 中间格式对齐
-- 组合后处理参数与最终 48kHz / PCM16 对齐
-- 构建阶段验证全部关键工具 SHA-256
-- 运行前再次验证全部关键工具 SHA-256
-- 工具链不匹配或 Rubber Band 不存在时拒绝降级冒充 exact
-- 新增 `THIRD_PARTY_N19.md` 记录哈希、阶段、第三方依赖和 reproducibility 说明
+- 升级为 AVR 1.77.0 原版 SoX + Rubber Band + FFmpeg 工具链
+- 精确阶段 / 参数 / 中间格式
+- 构建与运行时 SHA-256 校验
+
+## v0.5.0
+
+- 持久化歌曲列表
+- 每个 Suno clip 单独记录
+- Suno WAV 请求/下载
+- 歌词 + 原始 WAV + N19 WAV 本地保存
+- 歌曲列表直接进入 N19
+
+## v0.5.1
+
+- 固定 `%APPDATA%\SunoOriginalStudio`
+- 旧 profile / Session 迁移
+
+## v0.5.2
+
+- 新增“排除风格”
+- 独立写入 `negative_tags`
+
+## v0.5.3
+
+- 已 N19 完成歌曲前端禁选
+- 后端再次强制跳过，防止重复处理
+- 增强 Clerk 登录状态识别与 Session 落盘
+
+## v0.5.4
+
+- 歌曲列表增加“试听”
+- 内置播放 / 暂停 / 停止
+- 进度条与时间显示
+- 音量控制
+- N19 WAV → 原始 WAV → Suno 在线音频自动选源
 
 ---
 
-# 八、维护规则
+# 九、维护规则
 
-1. 每次更新代码同步更新本文件。
-2. 已做完改为 ✅；做到一半改为 🟡；新需求加入对应章节；明确取消改为 🚫。
-3. 每次发布版本增加版本记录。
-4. 不把 AVR License、授权、公告、反馈重新引入本项目。
-5. 优先保证“原创 + 多账号 + 官方验证 + 精确 N19 + 批量 + 下载”主线。
-6. Suno Web 私有接口、模型映射、CAPTCHA 配置都可能变化，需要持续维护。
-7. N19 exact 模式必须先通过工具链哈希校验，不能静默退化为 FFmpeg-only 兼容链路。
-8. 因 AVR 原链路含 `dither -s`，不得用“每次输出文件 hash 必然一致”作为精确复刻标准；精确标准是二进制工具、阶段、参数和中间格式一致。
+1. **每次代码修改都必须同步本文件。**
+2. 做完改成 ✅，部分完成改成 🟡，没有做保持 ⬜。
+3. 每个正式版本都要在“版本记录”增加条目。
+4. README 的“当前版本”和“当前功能”必须同步。
+5. 新增 P0/P1 需求时，要同步“接下来做什么 / 怎么做”。
+6. N19 exact 模式绝不静默退化成 FFmpeg-only 兼容链路。
+7. 已 `deaiStatus=complete` 的歌曲默认永不重复 N19；以后如需重做，只能增加明确的“强制重新处理”功能。
+8. 所有 Suno 登录/token 逻辑最终只能保留一套共享实现，不能在 `main.js`、`song_library.js`、批量模块各写一套。
+9. 自动下载与自动 N19 必须具备幂等判断，程序重启不能重复下载/重复处理。
+10. 批量原创必须先写 checkpoint 再进入下一首，避免网络异常或程序退出造成重复提交。
+11. Suno Web 私有接口可能变化，接口错误必须清晰记录，不能静默吞错。
+12. 人机验证只使用官方流程，不做识别、绕过、伪造 token 或第三方代解。
