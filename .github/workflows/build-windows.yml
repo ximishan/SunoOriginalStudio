@@ -3,7 +3,9 @@ name: Build SunoOriginalStudio Windows
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - integrate-avr-exact-n19-v0.4.0
     paths:
       - 'bootstrap.js'
       - 'main.js'
@@ -12,6 +14,8 @@ on:
       - 'renderer.js'
       - 'index.html'
       - 'package.json'
+      - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
+      - 'THIRD_PARTY_N19.md'
       - '.github/workflows/build-windows.yml'
 
 permissions:
@@ -31,14 +35,15 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.3.0_Windows
-          exe=SunoOriginalStudio_v0.3.0.exe
+          artifact=SunoOriginalStudio_v0.4.0_Windows
+          exe=SunoOriginalStudio_v0.4.0.exe
           source_sha=${{ github.sha }}
+          exact_n19_toolchain=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build_status/suno_original_studio.txt
-          git commit -m "Start SunoOriginalStudio build ${{ github.run_id }}" || exit 0
+          git commit -m "Start SunoOriginalStudio v0.4.0 build ${{ github.run_id }}" || exit 0
           git push
 
       - name: Setup Node
@@ -46,8 +51,59 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install
+      - name: Install JavaScript dependencies
         run: npm install
+
+      - name: Prepare exact AVR N19 toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force vendor/avr-n19/sox | Out-Null
+
+          $ffmpegUrl = 'https://raw.githubusercontent.com/imageio/imageio-binaries/master/ffmpeg/ffmpeg-win-x86_64-v7.1.exe'
+          $ffmpegPath = 'vendor/avr-n19/ffmpeg-win-x86_64-v7.1.exe'
+          curl.exe -L --fail --retry 4 --retry-delay 2 $ffmpegUrl -o $ffmpegPath
+          $ffHash = (Get-FileHash $ffmpegPath -Algorithm SHA256).Hash.ToLower()
+          if ($ffHash -ne '2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3') {
+            throw "AVR FFmpeg hash mismatch: $ffHash"
+          }
+
+          $soxZip = Join-Path $env:RUNNER_TEMP 'sox-14.4.2-win32.zip'
+          $soxExtract = Join-Path $env:RUNNER_TEMP 'sox-14.4.2-win32'
+          curl.exe -L --fail --retry 4 --retry-delay 2 'https://downloads.sourceforge.net/project/sox/sox/14.4.2/sox-14.4.2-win32.zip' -o $soxZip
+          Expand-Archive -Path $soxZip -DestinationPath $soxExtract -Force
+          $soxExe = Get-ChildItem -Path $soxExtract -Filter sox.exe -Recurse | Select-Object -First 1
+          if (-not $soxExe) { throw 'Cannot find sox.exe in official SoX 14.4.2 archive' }
+          Copy-Item -Path (Join-Path $soxExe.Directory.FullName '*') -Destination 'vendor/avr-n19/sox' -Recurse -Force
+
+          $expected = @{
+            'sox.exe'='e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439';
+            'libflac-8.dll'='2c154aeaad085e01361b967adfec84b63db76a82a45681b3e6cdfacb6088e369';
+            'libgcc_s_sjlj-1.dll'='2af381dbd5ea1a9a150307b1cba3a150321a3c3ff09fb6ead9bba1e880e03a64';
+            'libgomp-1.dll'='9dbbb0cb3f31ded7fbf51141a39578c0bc5cc85b83e9b6908657a6083948b9ba';
+            'libid3tag-0.dll'='4ec8e74cdd48a388a41f7f3ab2cea810a1661f47e79b6338192f000341f20af0';
+            'libogg-0.dll'='3262325b43b6f249831cc15428372a6daa34cf2459e66ed047dbbd9f00f49378';
+            'libpng16-16.dll'='22d46adb7927690eeeb1a27f9544108f7a1c66bf1daec90f3c41aa36e176920d';
+            'libsox-3.dll'='240a7e47a4274908786220f1b92372ed1b5f2a1c29874292fad5e64f120d84b4';
+            'libssp-0.dll'='113da78ba0514b3947e0988376002c4d5f783d62d5058f99259771648f2e9138';
+            'libvorbis-0.dll'='03ae1625a47c1255d70e7d63ee42ef2483c7e2adc9a33d21f45799f323a530b4';
+            'libvorbisenc-2.dll'='3b809daf958b6dedeedbe05e91a0ac016b18c871b33dc98c728f8b3440874385';
+            'libvorbisfile-3.dll'='1a14d8b0749f66811dacb23b093d54d4ff88036d49fd017b0d98b21de7f9ef1d';
+            'libwavpack-1.dll'='9123e73f801629a8791c80d9dc5041ee23f7f1d9ed8510f2f758269159aa26b8';
+            'libwinpthread-1.dll'='036af4b9aed20a6bd8b1993f2e0a4789c2ba555c00c0b2d72a6d6a6b8c13ef68';
+            'zlib1.dll'='189336a0cf1131d6a681e81b43385ade7252f7211df50774772d8c8ec40d5f8f';
+          }
+          foreach ($name in $expected.Keys) {
+            $p = Join-Path 'vendor/avr-n19/sox' $name
+            if (-not (Test-Path $p)) { throw "AVR SoX dependency missing: $name" }
+            $actual = (Get-FileHash $p -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $expected[$name]) { throw "AVR SoX hash mismatch for $name : $actual" }
+          }
+
+          $filters = & $ffmpegPath -hide_banner -filters 2>&1 | Out-String
+          if ($filters -notmatch 'rubberband') { throw 'Exact AVR FFmpeg does not expose rubberband filter' }
+          & 'vendor/avr-n19/sox/sox.exe' --version
+          Write-Host 'Exact AVR N19 toolchain verified.'
 
       - name: Syntax check
         shell: pwsh
@@ -58,43 +114,53 @@ jobs:
           node --check preload.js
           node --check renderer.js
 
-      - name: Verify bundled FFmpeg
-        shell: pwsh
-        run: |
-          node -e "const p=require('ffmpeg-static'); const fs=require('fs'); if(!p || !fs.existsSync(p)) throw new Error('ffmpeg-static missing: '+p); console.log('FFmpeg:', p)"
-
       - name: Build portable EXE
         run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Verify EXE
+      - name: Verify packaged N19 binaries and EXE
         shell: pwsh
         run: |
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.3.0.exe'
-          if ($exe.Length -lt 70000000) { throw "EXE unexpectedly small: $($exe.Length)" }
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.4.0.exe'
+          if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
+
+          $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
+          $packedSox = 'dist\win-unpacked\resources\tools\n19\sox\sox.exe'
+          $ffHash = (Get-FileHash $packedFfmpeg -Algorithm SHA256).Hash.ToLower()
+          $soxHash = (Get-FileHash $packedSox -Algorithm SHA256).Hash.ToLower()
+          if ($ffHash -ne '2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3') {
+            throw "Packaged FFmpeg was modified by packaging/signing: $ffHash"
+          }
+          if ($soxHash -ne 'e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439') {
+            throw "Packaged SoX was modified by packaging/signing: $soxHash"
+          }
+          $filters = & $packedFfmpeg -hide_banner -filters 2>&1 | Out-String
+          if ($filters -notmatch 'rubberband') { throw 'Packaged FFmpeg lost rubberband filter' }
           Write-Host "Built:" $exe.FullName $exe.Length
+          Write-Host "Packaged exact FFmpeg SHA256:" $ffHash
+          Write-Host "Packaged exact SoX SHA256:" $soxHash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.3.0_Windows
-          path: dist/SunoOriginalStudio_v0.3.0.exe
+          name: SunoOriginalStudio_v0.4.0_Windows
+          path: dist/SunoOriginalStudio_v0.4.0.exe
           if-no-files-found: error
 
       - name: Publish prerelease
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.3.0
-          name: Suno Original Studio v0.3.0
+          tag_name: suno-original-studio-v0.4.0
+          name: Suno Original Studio v0.4.0
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.3.0.exe
+          files: dist/SunoOriginalStudio_v0.4.0.exe
           body: |
-            Integrates the N19-compatible AI trace cleaner into SunoOriginalStudio.
-            Adds multi-file audio selection, configurable output directory, sequential batch processing,
-            cancellation, output-folder opening, metadata removal, and 48 kHz PCM16 WAV output.
-            Uses bundled FFmpeg and preserves the existing Suno original-generation and official verification flow.
+            Integrates the AVR 1.77.0 N19 audio path using the matching SoX toolchain and matching imageio FFmpeg v7.1 binary with librubberband enabled.
+            The build and runtime verify SHA-256 hashes before processing and use the extracted AVR stage order and parameters.
 
       - name: Report successful build
         shell: pwsh
@@ -103,10 +169,11 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.3.0_Windows
-          exe=SunoOriginalStudio_v0.3.0.exe
+          artifact=SunoOriginalStudio_v0.4.0_Windows
+          exe=SunoOriginalStudio_v0.4.0.exe
           source_sha=${{ github.sha }}
+          exact_n19_toolchain=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git add build_status/suno_original_studio.txt
-          git commit -m "Finish SunoOriginalStudio build ${{ github.run_id }}" || exit 0
+          git commit -m "Finish SunoOriginalStudio v0.4.0 build ${{ github.run_id }}" || exit 0
           git push

@@ -1,16 +1,13 @@
 {
   "name": "suno-original-demo",
-  "version": "0.3.0",
-  "description": "Suno original-song desktop tool with official verification handoff and integrated N19 audio trace cleaner",
+  "version": "0.4.0",
+  "description": "Suno original-song desktop tool with official verification handoff and exact AVR N19 SoX/Rubber Band/FFmpeg audio chain",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win portable"
-  },
-  "dependencies": {
-    "ffmpeg-static": "^5.2.0"
   },
   "devDependencies": {
     "electron": "37.4.0",
@@ -20,9 +17,6 @@
     "appId": "com.musicvmauto.sunooriginaldemo",
     "productName": "Suno原创Demo",
     "asar": true,
-    "asarUnpack": [
-      "node_modules/ffmpeg-static/**"
-    ],
     "files": [
       "bootstrap.js",
       "main.js",
@@ -30,12 +24,18 @@
       "preload.js",
       "index.html",
       "renderer.js",
-      "package.json",
-      "node_modules/ffmpeg-static/**"
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/avr-n19",
+        "to": "tools/n19",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": [{"target": "portable", "arch": ["x64"]}],
-      "artifactName": "SunoOriginalStudio_v0.3.0.exe"
+      "artifactName": "SunoOriginalStudio_v0.4.0.exe"
     }
   }
 }

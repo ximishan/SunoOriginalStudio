@@ -13,9 +13,9 @@ SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是�
 - 用户自己输入完整歌词、歌名、风格提示词
 - 3 个独立 Suno 账号 Session
 - Suno 官方人机验证衔接
-- 任务状态查询、后续自动轮询与下载
+- 任务状态查询，后续自动轮询与下载
 - Excel 批量原创、多账号轮流执行、断点恢复
-- 集成 N19 AI 消痕音频处理
+- 集成 AVR 1.77.0 N19 AI 消痕完整音频链路
 
 明确不做：AVR 激活码、License、设备绑定、授权到期、最大批次数授权限制、消息中心、公告、反馈、AVR 远程模型配置下发、AVR 自有版本更新体系、智能母带。
 
@@ -23,14 +23,14 @@ SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是�
 
 ## 二、当前版本与状态
 
-当前开发版本：`v0.3.0`
+当前开发版本：`v0.4.0`
 
 仓库：`ximishan/SunoOriginalStudio`
 
 状态说明：
 
 - ✅ 已完成：代码已经存在并可进入实际测试
-- 🟡 部分完成：核心链路有了，但还需要实机验证、UI 或调度补全
+- 🟡 部分完成：核心链路有了，但还需要持续实机兼容验证、UI 或调度补全
 - ⬜ 未完成：尚未实现
 - 🚫 不做：明确排除
 
@@ -39,7 +39,10 @@ SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是�
 - `v0.1.0`：原创 Demo、3 账号、手动状态查询
 - `v0.1.1`：增加人机验证检测，但仍是“打开页面 + 等待”旧方案
 - `v0.2.0`：重做人机验证为官方 Challenge → Token → 原任务自动续提
-- `v0.3.0`：把之前独立版 N19 AI 消痕集成进主程序，内置 FFmpeg，支持多文件批量处理
+- `v0.3.0`：把独立版 FFmpeg-only N19 兼容实现集成进主程序
+- `v0.4.0`：将 AI 消痕升级为 AVR 1.77.0 原版完整 `SoX + Rubber Band + FFmpeg` 工具链与执行路径，并增加构建时、运行时 SHA-256 校验
+
+当前最高优先级：**先把 v0.4.0 精确 N19 链路实机跑稳，再继续自动下载、自动消痕和 Excel 批量原创。**
 
 ---
 
@@ -140,42 +143,114 @@ SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是�
 | 避免重复下载 | ⬜ |
 | 生成完成后自动送入 AI 消痕 | ⬜ |
 
-## 3.6 AI 消痕 · N19
+## 3.6 AI 消痕 · AVR N19 完整链路
 
-`v0.3.0` 开始正式集成。
+`v0.4.0` 起，FFmpeg-only 兼容实现不再作为主执行链。当前主链路改为对 AVR 1.77.0 中 N19 模块的工具链、阶段顺序和参数进行精确对齐。
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
 | 主程序独立“AI 消痕”页面 | ✅ | 与原创页切换 |
-| 内置 FFmpeg | ✅ | `ffmpeg-static`，无需用户安装 |
 | 多文件选择 | ✅ | WAV/MP3/FLAC/M4A/AAC/OGG/WMA |
 | 批量顺序处理 | ✅ | 一次处理多个文件 |
-| 自定义输出目录 | ✅ | 不设置则源文件旁创建 `AI消痕输出` |
-| N19 兼容 DSP 链 | ✅ | FFmpeg-only 版本 |
-| Pitch 调整 | ✅ | `asetrate + aresample + atempo` |
-| EQ / 高低通 | ✅ | 多段 EQ |
-| Echo / 空间感 | ✅ | aecho |
-| Loudness normalization | ✅ | loudnorm |
-| Compressor / Limiter | ✅ | 动态处理 |
-| Metadata 清理 | ✅ | `-map_metadata -1` |
-| 输出 48kHz PCM16 Stereo WAV | ✅ | 统一格式 |
-| 防止覆盖同名文件 | ✅ | 自动追加序号 |
-| 任务取消 | ✅ | 可停止当前 FFmpeg 进程 |
-| 实时处理日志 | ✅ | 主界面显示 |
+| 自定义输出目录 | ✅ | 默认源文件旁 `AI消痕输出` |
+| 任务取消 | ✅ | 可停止当前子进程 |
+| 实时处理日志 | ✅ | 主界面显示阶段 |
 | 打开输出目录 | ✅ | 一键打开 |
-| 自动处理 Suno 下载结果 | ⬜ | 等自动下载完成后串联 |
-| 完整 SoX + Rubber Band 字节级 AVR 复刻 | ⬜ | 当前仍是之前独立版同类 FFmpeg-only 兼容实现 |
+| AVR SoX 14.4.2 工具链 | ✅ | 与 AVR 1.77.0 中提取文件哈希对齐 |
+| AVR FFmpeg v7.1 工具链 | ✅ | `ffmpeg-win-x86_64-v7.1.exe` |
+| Rubber Band filter | ✅ | `--enable-librubberband`，节点 9 使用 `rubberband=pitch=0.975` |
+| 构建时工具链 SHA-256 校验 | ✅ | 不匹配则构建失败 |
+| 运行时工具链 SHA-256 校验 | ✅ | 不匹配则拒绝标记/执行 exact 模式 |
+| 解码阶段 | ✅ | 44.1kHz / Stereo / PCM16 |
+| SoX 节点 1 | ✅ | 原参数、原顺序 |
+| 节点间 loudnorm | ✅ | `I=-15:TP=-1.5:LRA=11` |
+| FFmpeg 节点 9 | ✅ | 48kHz / Rubber Band / PCM24 |
+| 组合后处理 | ✅ | 原 EQ / compressor / limiter |
+| Metadata 清理 | ✅ | 节点 9 与最终输出 `-map_metadata -1` |
+| 最终输出 | ✅ | 48kHz / PCM16 / Stereo WAV |
+| AVR 输出命名规则 | ✅ | `-消痕-N19`，冲突追加 UUID 6 位 |
+| AVR 1GB 输入限制 | ✅ | >1GB 拒绝处理 |
+| 中间文件自动清理 | ✅ | temp `deai-xxxxxxxxxx` |
+| 自动处理 Suno 下载结果 | ⬜ | 等自动下载功能后串联 |
 
-当前 N19 参考结构：
+### 3.6.1 精确阶段顺序
 
 ```text
-前置高低通 / 高频 EQ / 空间感
-→ Loudness normalization
-→ Pitch fallback（asetrate / resample / atempo）
-→ AVR Scheme 9 EQ / Echo / Compressor / Limiter
-→ 组合后处理
-→ 48k PCM16 WAV
+源音频
+↓
+00-decode.wav
+FFmpeg：Stereo / 44100 Hz / PCM16
+↓
+01-scheme1.wav
+SoX 节点 1
+↓
+02-norm.wav
+FFmpeg loudnorm：I=-15:TP=-1.5:LRA=11
+Stereo / 44100 Hz / PCM16
+↓
+03-scheme9.wav
+FFmpeg 节点 9：Rubber Band pitch=0.975
+Stereo / 48000 Hz / PCM24
+metadata stripped
+↓
+最终 WAV
+组合后处理
+Stereo / 48000 Hz / PCM16
+metadata stripped
 ```
+
+### 3.6.2 SoX 节点 1
+
+```text
+highpass 28
+pitch -22
+treble -0.20 8500
+treble 0 7000
+treble -1.5 10000
+treble -2.5 12000
+lowpass 15000
+reverb 15 40 40 45
+gain -n -1.8
+rate 44100
+dither -s
+```
+
+### 3.6.3 FFmpeg 节点 9
+
+```text
+rubberband=pitch=0.975,
+equalizer=f=80:g=4.0:width_type=h:width=80,
+equalizer=f=150:g=3.0:width_type=h:width=100,
+equalizer=f=300:g=-1.5:width_type=h:width=200,
+equalizer=f=1500:g=-1.0:width_type=h:width=400,
+equalizer=f=4000:g=3.5:width_type=h:width=2000,
+equalizer=f=8000:g=1.8:width_type=h:width=4000,
+aecho=0.55:0.4:35|45:0.12|0.08,
+volume=2.0,
+highpass=f=45,
+acompressor=threshold=-18dB:ratio=2.0:attack=10:release=120:makeup=1.5,
+volume=2.0dB,
+alimiter=limit=0.97
+```
+
+### 3.6.4 组合后处理
+
+```text
+highpass=f=28,
+equalizer=f=120:g=0.25:width_type=h:width=100,
+equalizer=f=1800:g=0.20:width_type=h:width=1200,
+equalizer=f=7200:g=-0.18:width_type=h:width=3800,
+acompressor=threshold=-19dB:ratio=1.18:attack=24:release=210:makeup=1,
+alimiter=limit=0.96
+```
+
+### 3.6.5 “字节级复刻”的准确含义
+
+v0.4.0 对齐的是：**同一第三方二进制工具链 + 同一阶段顺序 + 同一参数 + 同一中间采样率/位深/编码格式**。
+
+AVR 原链路本身包含 SoX `dither -s`。Dither 会引入噪声，因此即使使用完全相同的二进制和命令，两次独立运行的最终 WAV 文件 SHA-256 也不保证相同。不能把“同一执行链路”错误宣传成“每次输出文件 hash 必然相同”。
+
+完整工具链哈希与第三方说明见 `THIRD_PARTY_N19.md`。
 
 ## 3.7 Excel 批量原创
 
@@ -205,19 +280,27 @@ SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是�
 
 # 五、AVR Suno Cover 1.77.0 详细功能列表
 
-以下来自对 AVR 1.77.0 Electron 客户端、preload IPC、renderer bundle、main process 与内置 engine 的静态分析。它表示 AVR 具备/预留的能力，不表示我们全部复制。
+以下来自对 AVR 1.77.0 Electron 客户端、preload IPC、renderer bundle、main process 与内置 engine 的静态分析。它表示 AVR 具备/预留的能力，不表示本项目全部复制。
 
 ## 5.1 主导航
 
-首页、翻唱、原创、歌曲改词、任务中心、作品库、AI 消痕、智能母带。
+AVR 主界面包含：首页、翻唱、原创、歌曲改词、任务中心、作品库、AI 消痕、智能母带。
 
 ## 5.2 首页
 
-软件运行状态、Suno 账号状态、任务概览、最近作品/任务、功能入口、授权信息、消息/公告入口。
+- 软件运行状态
+- Suno 账号状态
+- 任务概览
+- 最近作品 / 最近任务
+- 功能入口
+- 授权信息
+- 消息 / 公告入口
+
+授权、公告、消息类功能本项目不做。
 
 ## 5.3 Suno 账号管理
 
-AVR 使用：
+AVR 使用 3 个持久化 Session：
 
 ```text
 persist:suno-account-1
@@ -225,9 +308,9 @@ persist:suno-account-2
 persist:suno-account-3
 ```
 
-能力：打开登录窗口、检查状态、获取 Auth Token、删除账号、3 账号 Session 隔离与持久化、执行任务绑定账号、账号状态保护、Voice 列表、Voice 创建、人机验证状态。
+能力：打开登录窗口、检查状态、获取 Auth Token、删除账号、Session 隔离与持久化、执行任务绑定账号、账号状态保护、Voice 列表、Voice 创建、人机验证状态。
 
-IPC：
+主要 IPC：
 
 ```text
 getEngineStatus
@@ -257,15 +340,32 @@ v4.5+ / v4.5-all → chirp-bluejay
 POST https://studio-api-prod.suno.com/api/generate/v2-web/
 ```
 
-payload 包含 `token`、`token_provider`、`generation_type`、`title`、`tags`、`negative_tags`、`mv`、`prompt`、`make_instrumental`、`metadata`、`persona_id`、`transaction_uuid` 等。
+核心 payload 包含：
 
-IPC：`suggestOriginalTheme`、`createOriginalBatch`、`listLatestOriginalJobs`。
+```text
+token
+token_provider
+generation_type
+title
+tags
+negative_tags
+mv
+prompt
+make_instrumental
+metadata
+persona_id
+transaction_uuid
+```
+
+metadata 中已观察到 `weirdness_constraint`、`style_weight`、`vocal_gender`、`create_session_token` 等。
+
+主要 IPC：`suggestOriginalTheme`、`createOriginalBatch`、`listLatestOriginalJobs`。
 
 ## 5.5 AVR 翻唱
 
-支持批量翻唱、歌曲信息、素材识别、参考音频、使用原词、AI 改词、纯音乐、语言、风格、Weirdness、Style Influence、Audio Influence、模型、性别、Voice、多个版本、预设、AutoPilot、素材确认、歌词确认、失败重试、结果下载。
+支持：批量翻唱、歌曲信息、素材识别、参考音频、使用原词、AI 改词、纯音乐、改词主题、语言、风格、Weirdness、Style Influence、Audio Influence、模型、性别、Voice、多个版本、预设、AutoPilot、素材确认、歌词确认、失败重试、结果下载。
 
-IPC：
+主要 IPC：
 
 ```text
 suggestRewriteTheme
@@ -282,11 +382,11 @@ attachAudioToJob
 
 ## 5.6 AVR 歌曲改词
 
-Source Song：accountId、songId、title、artist、duration、lyrics、local/Suno source。
+Source Song 字段包括：accountId、songId、title、artist、duration、lyrics、local/Suno source。
 
-歌词片段：id、text、startS、endS、sectionLabel、success。
+歌词片段结构：id、text、startS、endS、sectionLabel、success。
 
-状态：
+任务状态：
 
 ```text
 queued
@@ -302,11 +402,24 @@ failed
 cancelled
 ```
 
-IPC：`listSongEditJobs`、`listSunoEditableSongs`、`loadSongEditLyrics`、`createSongEdit`、`chooseSongEditCandidate`、`cancelSongEdit`、`retrySongEdit`、`deleteSongEdit`、`rewriteSongEditLyrics`、`onSongEditChanged`。
+主要 IPC：
 
-## 5.7 AVR 通用任务中心
+```text
+listSongEditJobs
+listSunoEditableSongs
+loadSongEditLyrics
+createSongEdit
+chooseSongEditCandidate
+cancelSongEdit
+retrySongEdit
+deleteSongEdit
+rewriteSongEditLyrics
+onSongEditChanged
+```
 
-状态：
+## 5.7 AVR 任务中心
+
+通用任务状态：
 
 ```text
 queued
@@ -326,50 +439,84 @@ failed
 cancelled
 ```
 
-IPC：`listLatestJobs`、`listLatestOriginalJobs`、`listRecentJobs`、`listAllJobs`、`retryJob`、`cancelJob`、`deleteJob`。
+主要 IPC：
+
+```text
+listLatestJobs
+listLatestOriginalJobs
+listRecentJobs
+listAllJobs
+retryJob
+cancelJob
+deleteJob
+```
 
 ## 5.8 AVR 作品库
 
-`listCompletedWorks`、`openWorksDirectory`；包含已完成作品、本地作品目录、下载结果与相关文件保存。
+主要 IPC：
 
-## 5.9 AVR 人机验证 / Suno 风控
+```text
+listCompletedWorks
+openWorksDirectory
+```
+
+能力：已完成作品列表、本地作品目录、打开目录、下载结果、保存歌曲相关文件。
+
+## 5.9 AVR Suno 人机验证 / 风控
 
 预检：
 
 ```text
 POST /api/c/check
-{"ctype":"generation"}
+body: {"ctype":"generation"}
 ```
 
-provider：`captcha_version=1 → hCaptcha/token_provider=1`；其他/2 → Turnstile/token_provider=2。
+读取 `required` 与 `captcha_version`。
 
-Turnstile 使用官方 `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit`，可见 Managed Challenge，具备 callback/error/expired/timeout/unsupported、自动重试、手动重载、取消、5 分钟等待。
-
-hCaptcha 使用 Suno hCaptcha endpoint/assets，支持 invisible challenge 和必要的交互挑战，以及 callback/error/expired/chalexpired/open/close、自动重试、手动重载、取消、超时。
-
-拿到 token 后重发原生成请求，带 `token` + `token_provider`，其他歌名、歌词、风格、模型等保持一致。
-
-## 5.10 AVR Voice
-
-`listSunoVoices`、`createSunoVoice`；获取/创建 Persona，并用于原创/翻唱。
-
-## 5.11 AVR AI 消痕
-
-AVR 的 AI 消痕实际上是固定 DSP，不是神经网络 AI。
-
-方案：`n19`
+provider 映射：
 
 ```text
-SoX 节点 1
-→ 节点间响度对齐
-→ FFmpeg 节点 9
-→ 组合后处理
-→ 48k PCM16 WAV
+captcha_version = 1 → hCaptcha → token_provider = 1
+captcha_version = 2/其他 → Cloudflare Turnstile → token_provider = 2
 ```
 
-主要处理：高低通、Pitch、EQ、Reverb/Echo、Loudness normalization、Compressor、Limiter、Resample、Dither、metadata 清理、48kHz PCM16 输出。
+若 `/api/generate/v2-web/` 返回 422 且包含 verify/verification/captcha，人机验证链路会启动。
 
-IPC：
+Turnstile 使用官方 Cloudflare challenge；hCaptcha 使用 Suno 对应的官方组件。验证后得到 token，再以相同歌名、歌词、风格、模型等参数自动续提原任务。
+
+本项目只衔接官方 challenge，不识别、破解、代答或绕过验证码。
+
+## 5.10 AVR Voice / Persona
+
+已确认 IPC：
+
+```text
+listSunoVoices
+createSunoVoice
+```
+
+能力：获取 Voice/Persona、创建 Voice、原创/翻唱任务选择 Voice。
+
+## 5.11 AVR AI 消痕 N19
+
+AVR 1.77.0 的 AI 消痕不是神经网络模型，而是固定 DSP 链路。
+
+原模块 docstring 明确描述：
+
+```text
+AI 消痕：N-1-9（简单）原版链路。
+节点 1（SoX）→ 节点间响度对齐 → 节点 9（FFmpeg）→ 组合后处理 → 48k PCM16 WAV
+```
+
+已确认 AVR engine 中实际捆绑：
+
+- SoX 14.4.2 Windows 工具链
+- `ffmpeg-win-x86_64-v7.1.exe`
+- 该 FFmpeg 编译配置包含 `--enable-librubberband`
+
+v0.4.0 已按同一工具链哈希、同一命令阶段、同一参数和中间格式实现。
+
+AVR AI 消痕主要 IPC：
 
 ```text
 listDeaiJobs
@@ -380,86 +527,168 @@ openDeaiDirectory
 onDeaiChanged
 ```
 
-SunoOriginalStudio v0.3.0 已把此前独立版的 FFmpeg-only N19 兼容实现集成进主程序；尚未集成完整 SoX/Rubber Band 双引擎版本。
-
 ## 5.12 AVR 智能母带
 
-预设：dynamic、balanced、loud。
+AVR 提供 dynamic / balanced / loud 等母带预设，并有任务列表、重试、重新母带、输出目录等 IPC。
 
-IPC：`listMasteringJobs`、`enqueueMasteringJobs`、`retryMasteringJob`、`remasterAsNewVersion`、`clearFinishedMasteringJobs`、`getMasteringOutputDir`、`openMasteringDirectory`、`onMasteringChanged`。
+主要 IPC：
 
-本项目明确不做。
+```text
+listMasteringJobs
+enqueueMasteringJobs
+retryMasteringJob
+remasterAsNewVersion
+clearFinishedMasteringJobs
+getMasteringOutputDir
+openMasteringDirectory
+onMasteringChanged
+```
 
-## 5.13 设置
+本项目明确不做智能母带。
 
-`getSettings`、`saveSettings`、`selectWorksDirectory`；读取/保存设置、自定义作品目录。
+## 5.13 AVR 设置与窗口
 
-## 5.14 窗口控制
+设置 IPC：`getSettings`、`saveSettings`、`selectWorksDirectory`。
 
-`getAppInfo`、`openWorksDirectory`、`minimizeWindow`、`toggleMaximizeWindow`、`isWindowMaximized`、`closeWindow`、`onWindowMaximizedChanged`。
+窗口 IPC：
 
-## 5.15 License / 授权
+```text
+getAppInfo
+openWorksDirectory
+minimizeWindow
+toggleMaximizeWindow
+isWindowMaximized
+closeWindow
+onWindowMaximizedChanged
+```
 
-激活码、License 激活/续期/心跳、设备 ID/设备名、最大设备、最大批量数、授权时间；状态 active/expired/suspended/revoked/device_unbound/deleted；时长 1d/7d/30d/90d/365d/permanent/custom。全部不做。
+## 5.14 AVR License / 授权体系
 
-## 5.16 消息 / 公告 / 反馈
+AVR 包含激活码、License 激活/续期/心跳、设备 ID、设备名、最大设备数、最大歌曲批量数、授权时间等。
 
-`listInbox`、`markInboxRead`、`sendFeedback`。全部不做。
+观察到授权时长：`1d`、`7d`、`30d`、`90d`、`365d`、`permanent`、`custom`。
 
-## 5.17 远程模型配置
+观察到状态：`active`、`expired`、`suspended`、`revoked`、`device_unbound`、`deleted`。
 
-AVR 存在 modelEndpoint、modelName、modelApiKey、HTTPS Endpoint、签名配置等，服务 AI 改词/主题生成。本项目不依赖 AVR 后端。
+本项目全部不做。
+
+## 5.15 AVR 消息 / 公告 / 反馈
+
+IPC：`listInbox`、`markInboxRead`、`sendFeedback`。本项目全部不做。
+
+## 5.16 AVR 远程模型配置
+
+AVR 存在服务端下发 `modelEndpoint`、`modelName`、`modelApiKey` 等配置，主要服务 AI 改词/主题生成。本项目当前以用户自带歌词为主，不依赖 AVR 后端，也不复用该配置体系。
 
 ---
 
-# 六、当前开发优先级
+# 六、开发优先级
 
-## P0 原创核心
+## P0：原创核心 + 精确 N19
 
-✅ 3 账号、自定义歌名/歌词/风格、模型/人声/Weirdness/Style、原创提交、人机验证、token 回传、验证后续提。
+1. ✅ 3 个 Suno 独立账号
+2. ✅ 自定义歌名 / 歌词 / 风格
+3. ✅ 模型 / 人声 / Weirdness / Style Influence
+4. ✅ 原创提交
+5. ✅ 官方人机验证 Challenge → Token → 自动续提代码链路
+6. ✅ AVR N19 原版 SoX + Rubber Band + FFmpeg 精确执行路径
+7. ✅ 构建/运行时 N19 二进制哈希校验
+8. ⬜ 自动轮询生成完成
+9. ⬜ 自动下载
+10. ⬜ 生成完成后自动送入 N19
 
-下一步：`自动轮询生成完成 → 自动下载`。
+## P1：批量原创
 
-## P1 批量原创
+1. Excel 导入
+2. 多任务队列
+3. 3 账号轮流执行
+4. 单账号忙碌锁
+5. 验证时只暂停对应账号
+6. checkpoint
+7. 重启恢复
+8. 自动下载
+9. 自动 N19 消痕
+10. 结果 Excel
 
-Excel 导入、多任务队列、3 账号轮流、账号锁、验证只暂停对应账号、checkpoint、重启恢复、自动下载、结果 Excel。
+## P2：体验完善
 
-## P2 体验完善
+1. 登录完成自动返回
+2. 账号退出 / 重登
+3. 本地作品库
+4. 下载目录设置
+5. 任务历史
+6. 失败重试
+7. Voice / Persona
 
-登录自动返回、账号退出/重登、本地作品库、下载目录、任务历史、失败重试、Voice/Persona。
+## P3：可选扩展
 
-## P3 音频后处理 / 可选
+1. 翻唱
+2. 歌曲改词
+3. AI 主题推荐
+4. AI 写歌词
 
-- ✅ AI 消痕基础集成
-- ⬜ Suno 下载完成后自动 AI 消痕
-- ⬜ 完整 SoX + Rubber Band N19
-- ⬜ 翻唱 / 改词 / AI 主题与歌词
-
-智能母带不进入计划。
+智能母带不进入开发计划。
 
 ---
 
 # 七、版本记录
 
 ## v0.1.0
-初版 Electron Demo；3 个账号；自定义歌名/歌词/风格；原创提交；状态查询。
+
+- 初版 Electron Demo
+- 3 个 Suno 登录槽位
+- 自定义歌名、歌词、风格
+- 原创提交
+- 任务状态查询
 
 ## v0.1.1
-增加验证需求检测、验证窗口置顶、验证状态通知、验证后恢复尝试；仍非完整 token 链路。
+
+- 增加人机验证需求检测
+- 增加验证窗口置顶
+- 增加验证后自动恢复尝试
+- 验证尚不是完整 token 链路
 
 ## v0.2.0
-完整 Challenge → Token → 自动续提；支持 hCaptcha / Turnstile、422 验证兜底、token_provider、3 次自动重试、手动重载、取消、5 分钟超时、验证后返回主窗口；Windows GitHub Actions 构建。
+
+- `/api/c/check` 的 `captcha_version` 参与 provider 选择
+- 接入 hCaptcha / Turnstile 官方 challenge
+- challenge token 自动写入原创请求
+- 422 验证错误自动进入 challenge 并重发原任务
+- 自动重试、手动重载、取消和 5 分钟超时
 
 ## v0.3.0
-集成 AI 消痕：新增 `bootstrap.js` + `deai.js`；内置 `ffmpeg-static`；新增 AI 消痕页面；支持多文件批处理、自定义输出目录、任务取消、进度日志、打开输出目录；N19 FFmpeg-only 兼容 DSP；输出 48kHz 16-bit Stereo WAV；清理 metadata；不覆盖同名文件。
+
+- 集成 AI 消痕页面
+- FFmpeg-only N19 兼容 DSP 实现
+- 多文件批量处理
+- 自定义输出目录、取消、日志、打开目录
+- 48kHz PCM16 Stereo WAV 输出
+
+## v0.4.0
+
+- 从 AVR 1.77.0 engine 中确认 N19 原版工具链与准确阶段
+- 使用与 AVR 中一致的 SoX 14.4.2 文件集
+- 使用与 AVR 中一致的 imageio FFmpeg v7.1 Windows x64 二进制
+- 确认 FFmpeg 含 `librubberband`
+- SoX 节点 1 参数与执行顺序完整对齐
+- 节点间 loudnorm 完整对齐
+- FFmpeg 节点 9 改为真实 `rubberband=pitch=0.975`
+- 节点 9 输出 48kHz / PCM24，与 AVR 中间格式对齐
+- 组合后处理参数与最终 48kHz / PCM16 对齐
+- 构建阶段验证全部关键工具 SHA-256
+- 运行前再次验证全部关键工具 SHA-256
+- 工具链不匹配或 Rubber Band 不存在时拒绝降级冒充 exact
+- 新增 `THIRD_PARTY_N19.md` 记录哈希、阶段、第三方依赖和 reproducibility 说明
 
 ---
 
 # 八、维护规则
 
-1. 每次开发都更新本文件。
-2. 完成改 ✅；部分完成改 🟡；新增需求加入清单；明确不做标 🚫。
+1. 每次更新代码同步更新本文件。
+2. 已做完改为 ✅；做到一半改为 🟡；新需求加入对应章节；明确取消改为 🚫。
 3. 每次发布版本增加版本记录。
-4. 不重新引入 AVR License、授权、公告、反馈、智能母带。
-5. 核心主线：原创 + 多账号 + 人机验证 + 批量 + 下载 + AI 消痕。
-6. Suno Web 私有接口、Captcha Site Key、页面结构变化时要重新适配。
+4. 不把 AVR License、授权、公告、反馈重新引入本项目。
+5. 优先保证“原创 + 多账号 + 官方验证 + 精确 N19 + 批量 + 下载”主线。
+6. Suno Web 私有接口、模型映射、CAPTCHA 配置都可能变化，需要持续维护。
+7. N19 exact 模式必须先通过工具链哈希校验，不能静默退化为 FFmpeg-only 兼容链路。
+8. 因 AVR 原链路含 `dither -s`，不得用“每次输出文件 hash 必然一致”作为精确复刻标准；精确标准是二进制工具、阶段、参数和中间格式一致。

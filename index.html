@@ -49,8 +49,8 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Suno Original Studio v0.3.0</h1>
-    <div class="sub">原创歌曲 + 3 个独立 Suno 账号 + 官方人机验证衔接 + 集成 N19 AI 消痕。</div>
+    <h1>Suno Original Studio v0.4.0</h1>
+    <div class="sub">原创歌曲 + 3 个独立 Suno 账号 + 官方人机验证衔接 + AVR 1.77.0 原版 N19 完整音频链路。</div>
 
     <div class="tabs">
       <button id="tabOriginal" class="tab active">原创歌曲</button>
@@ -101,12 +101,12 @@
 
     <section id="deaiView" class="hidden">
       <div class="card">
-        <h2>AI 消痕 · N19</h2>
+        <h2>AI 消痕 · AVR N19 原版完整链路</h2>
         <div class="hero-note">
-          已把之前独立版的 AI 消痕能力集成进主程序。当前使用内置 FFmpeg 的 N19 兼容 DSP 链路，包含 Pitch、EQ、空间感、响度对齐、压缩、限制器、重采样和元数据清理，最终统一输出 <b>48kHz / 16-bit / Stereo WAV</b>。<br>
-          这是音频 DSP 处理，不是神经网络模型；当前版本采用我们之前独立版同类的 FFmpeg-only 方案。
+          v0.4.0 已改为 <b>SoX → 节点间响度对齐 → FFmpeg 节点 9（Rubber Band）→ 组合后处理</b> 的 AVR 1.77.0 N19 完整执行路径。程序启动处理前会校验内置 SoX、FFmpeg 以及 SoX 依赖 DLL 的 SHA-256，只有与 AVR 1.77.0 中提取出的工具链完全一致才允许执行。<br>
+          节点参数、阶段采样率/位深、Rubber Band pitch、EQ、Echo、Compressor、Limiter、Metadata 清理和最终 <b>48kHz / PCM16 / Stereo WAV</b> 输出均按原版链路执行。
         </div>
-        <div id="deaiEngine" class="small" style="margin-top:12px">正在检查内置引擎……</div>
+        <div id="deaiEngine" class="small" style="margin-top:12px">正在校验 AVR N19 原版工具链……</div>
 
         <div class="actions">
           <button id="deaiSelectFiles">选择音频文件</button>
