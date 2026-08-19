@@ -119,12 +119,28 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Verify EXE
+      - name: Verify packaged N19 binaries and EXE
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $exe = Get-Item 'dist\SunoOriginalStudio_v0.4.0.exe'
-          if ($exe.Length -lt 120000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
+          if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
+
+          $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
+          $packedSox = 'dist\win-unpacked\resources\tools\n19\sox\sox.exe'
+          $ffHash = (Get-FileHash $packedFfmpeg -Algorithm SHA256).Hash.ToLower()
+          $soxHash = (Get-FileHash $packedSox -Algorithm SHA256).Hash.ToLower()
+          if ($ffHash -ne '2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3') {
+            throw "Packaged FFmpeg was modified by packaging/signing: $ffHash"
+          }
+          if ($soxHash -ne 'e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439') {
+            throw "Packaged SoX was modified by packaging/signing: $soxHash"
+          }
+          $filters = & $packedFfmpeg -hide_banner -filters 2>&1 | Out-String
+          if ($filters -notmatch 'rubberband') { throw 'Packaged FFmpeg lost rubberband filter' }
           Write-Host "Built:" $exe.FullName $exe.Length
+          Write-Host "Packaged exact FFmpeg SHA256:" $ffHash
+          Write-Host "Packaged exact SoX SHA256:" $soxHash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -144,7 +160,7 @@ jobs:
           files: dist/SunoOriginalStudio_v0.4.0.exe
           body: |
             Integrates the AVR 1.77.0 N19 audio path using the matching SoX toolchain and matching imageio FFmpeg v7.1 binary with librubberband enabled.
-            The runtime verifies SHA-256 hashes before processing and uses the extracted AVR stage order and parameters.
+            The build and runtime verify SHA-256 hashes before processing and use the extracted AVR stage order and parameters.
 
       - name: Report successful build
         shell: pwsh
