@@ -5,17 +5,19 @@ on:
   push:
     branches:
       - main
-      - integrate-avr-exact-n19-v0.4.0
+      - song-library-v0.5.0
     paths:
       - 'bootstrap.js'
       - 'main.js'
       - 'deai.js'
+      - 'song_library.js'
       - 'preload.js'
       - 'renderer.js'
       - 'index.html'
       - 'package.json'
       - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
       - 'THIRD_PARTY_N19.md'
+      - 'V0.5_SONG_LIBRARY.md'
       - '.github/workflows/build-windows.yml'
 
 permissions:
@@ -35,15 +37,17 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.4.0_Windows
-          exe=SunoOriginalStudio_v0.4.0.exe
+          artifact=SunoOriginalStudio_v0.5.0_Windows
+          exe=SunoOriginalStudio_v0.5.0.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
+          song_library=true
+          suno_wav_pipeline=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build_status/suno_original_studio.txt
-          git commit -m "Start SunoOriginalStudio v0.4.0 build ${{ github.run_id }}" || exit 0
+          git commit -m "Start SunoOriginalStudio v0.5.0 build ${{ github.run_id }}" || exit 0
           git push
 
       - name: Setup Node
@@ -111,6 +115,7 @@ jobs:
           node --check bootstrap.js
           node --check main.js
           node --check deai.js
+          node --check song_library.js
           node --check preload.js
           node --check renderer.js
 
@@ -123,7 +128,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.4.0.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.0.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -139,28 +144,27 @@ jobs:
           $filters = & $packedFfmpeg -hide_banner -filters 2>&1 | Out-String
           if ($filters -notmatch 'rubberband') { throw 'Packaged FFmpeg lost rubberband filter' }
           Write-Host "Built:" $exe.FullName $exe.Length
-          Write-Host "Packaged exact FFmpeg SHA256:" $ffHash
-          Write-Host "Packaged exact SoX SHA256:" $soxHash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.4.0_Windows
-          path: dist/SunoOriginalStudio_v0.4.0.exe
+          name: SunoOriginalStudio_v0.5.0_Windows
+          path: dist/SunoOriginalStudio_v0.5.0.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.4.0
-          name: Suno Original Studio v0.4.0
+          tag_name: suno-original-studio-v0.5.0
+          name: Suno Original Studio v0.5.0
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.4.0.exe
+          files: dist/SunoOriginalStudio_v0.5.0.exe
           body: |
-            Integrates the AVR 1.77.0 N19 audio path using the matching SoX toolchain and matching imageio FFmpeg v7.1 binary with librubberband enabled.
-            The build and runtime verify SHA-256 hashes before processing and use the extracted AVR stage order and parameters.
+            Adds a persistent song list for every submitted Suno clip.
+            Tracks generation, WAV download, exact AVR N19 processing and local-save status.
+            Completed songs can be selected directly from the song list; the app requests the Suno WAV, saves lyrics and source WAV into a per-song directory, then runs the exact AVR 1.77.0 N19 chain and saves the processed WAV.
 
       - name: Report successful build
         shell: pwsh
@@ -169,11 +173,13 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.4.0_Windows
-          exe=SunoOriginalStudio_v0.4.0.exe
+          artifact=SunoOriginalStudio_v0.5.0_Windows
+          exe=SunoOriginalStudio_v0.5.0.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
+          song_library=true
+          suno_wav_pipeline=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git add build_status/suno_original_studio.txt
-          git commit -m "Finish SunoOriginalStudio v0.4.0 build ${{ github.run_id }}" || exit 0
+          git commit -m "Finish SunoOriginalStudio v0.5.0 build ${{ github.run_id }}" || exit 0
           git push
