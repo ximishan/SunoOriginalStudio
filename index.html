@@ -58,11 +58,19 @@
     .library-empty { padding:28px; text-align:center; color:#8f98aa; }
     .library-summary { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
     .check { width:auto; }
+    .player-bar { margin-top:14px; display:grid; grid-template-columns:auto minmax(220px,1fr) auto; gap:12px; align-items:center; padding:12px; border:1px solid #2a3040; border-radius:12px; background:#10141d; }
+    .player-buttons { display:flex; gap:8px; }
+    .player-main { min-width:0; }
+    .player-title { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .player-meta { display:flex; justify-content:space-between; gap:10px; margin-top:4px; color:#8f98aa; font-size:11px; }
+    .player-seek { margin-top:8px; padding:0; }
+    .player-volume { display:flex; align-items:center; gap:7px; min-width:150px; color:#9aa3b5; font-size:11px; }
+    .player-volume input { width:105px; padding:0; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Suno Original Studio v0.5.3</h1>
+    <h1>Suno Original Studio v0.5.4</h1>
     <div class="sub">原创歌曲 + 持久化歌曲列表 + Suno WAV 下载 + 歌曲列表直接 AVR N19 AI 消痕。</div>
 
     <div class="tabs">
@@ -135,6 +143,18 @@
         <label>歌曲保存目录</label>
         <div id="libraryRoot" class="path-box">正在读取……</div>
         <div class="small" style="margin-top:8px">处理完成后，每首歌会建立独立目录，保存“歌词.txt”、“Suno原始.wav”和“消痕-N19.wav”。</div>
+        <div class="player-bar">
+          <div class="player-buttons">
+            <button id="libraryPlayerToggle" disabled>播放</button>
+            <button id="libraryPlayerStop" class="secondary" disabled>停止</button>
+          </div>
+          <div class="player-main">
+            <div id="libraryPlayerTitle" class="player-title">还没有选择歌曲</div>
+            <div class="player-meta"><span id="libraryPlayerSource">点击歌曲右侧“试听”开始播放</span><span id="libraryPlayerTime">00:00 / 00:00</span></div>
+            <input id="libraryPlayerSeek" class="player-seek" type="range" min="0" max="1" step="0.1" value="0" disabled />
+          </div>
+          <div class="player-volume"><span>音量</span><input id="libraryPlayerVolume" type="range" min="0" max="100" value="85" /></div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>

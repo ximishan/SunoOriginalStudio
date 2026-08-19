@@ -6,6 +6,10 @@ let deaiRunning = false;
 let songLibrary = { songs: [], rootDir: '' };
 let selectedSongIds = new Set();
 let libraryBusy = false;
+const libraryAudio = new Audio();
+let playingClipId = '';
+let playingSource = null;
+let playerSeeking = false;
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
@@ -162,6 +166,82 @@ function isSongComplete(song) {
   return /^(complete|completed)$/i.test(String(song.generationStatus || ''));
 }
 
+function formatPlayerTime(value) {
+  const seconds = Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function refreshPlayerUi() {
+  const toggle = $('libraryPlayerToggle');
+  const stop = $('libraryPlayerStop');
+  const seek = $('libraryPlayerSeek');
+  const time = $('libraryPlayerTime');
+  const title = $('libraryPlayerTitle');
+  const source = $('libraryPlayerSource');
+  if (!toggle) return;
+
+  const hasTrack = Boolean(playingClipId && libraryAudio.src);
+  toggle.disabled = !hasTrack;
+  stop.disabled = !hasTrack;
+  toggle.textContent = hasTrack && !libraryAudio.paused ? '暂停' : '播放';
+  if (title) title.textContent = playingSource?.title || '还没有选择歌曲';
+  if (source) source.textContent = playingSource?.label || '点击歌曲右侧“试听”开始播放';
+
+  const duration = Number.isFinite(libraryAudio.duration) ? libraryAudio.duration : 0;
+  if (seek && !playerSeeking) {
+    seek.disabled = !hasTrack || !duration;
+    seek.max = duration || 1;
+    seek.value = Number.isFinite(libraryAudio.currentTime) ? libraryAudio.currentTime : 0;
+  }
+  if (time) time.textContent = `${formatPlayerTime(libraryAudio.currentTime)} / ${formatPlayerTime(duration)}`;
+
+  document.querySelectorAll('[data-play-song]').forEach(btn => {
+    const same = btn.dataset.playSong === playingClipId;
+    btn.textContent = same ? (libraryAudio.paused ? '继续' : '暂停') : '试听';
+  });
+}
+
+async function playSongFromLibrary(clipId) {
+  try {
+    if (playingClipId === clipId && libraryAudio.src) {
+      if (libraryAudio.paused) await libraryAudio.play();
+      else libraryAudio.pause();
+      refreshPlayerUi();
+      return;
+    }
+
+    const source = await window.demoApi.getSongPlaySource(clipId);
+    if (!source?.url) throw new Error('没有取得可播放的音频地址');
+    libraryAudio.pause();
+    libraryAudio.src = source.url;
+    libraryAudio.currentTime = 0;
+    playingClipId = clipId;
+    playingSource = source;
+    refreshPlayerUi();
+    await libraryAudio.play();
+    libraryLog(`正在试听：${source.title}（${source.label}）`, 'oktxt');
+    refreshPlayerUi();
+  } catch (e) {
+    libraryLog(e?.message || e, 'err');
+    refreshPlayerUi();
+  }
+}
+
+libraryAudio.preload = 'metadata';
+libraryAudio.volume = 0.85;
+libraryAudio.addEventListener('play', refreshPlayerUi);
+libraryAudio.addEventListener('pause', refreshPlayerUi);
+libraryAudio.addEventListener('loadedmetadata', refreshPlayerUi);
+libraryAudio.addEventListener('durationchange', refreshPlayerUi);
+libraryAudio.addEventListener('timeupdate', refreshPlayerUi);
+libraryAudio.addEventListener('ended', () => { libraryAudio.currentTime = 0; refreshPlayerUi(); });
+libraryAudio.addEventListener('error', () => {
+  if (playingClipId) libraryLog(`试听失败：${playingSource?.title || playingClipId}`, 'err');
+  refreshPlayerUi();
+});
+
 function renderSongLibrary() {
   const songs = songLibrary.songs || [];
   $('libraryRoot').textContent = songLibrary.rootDir || '未设置';
@@ -188,7 +268,7 @@ function renderSongLibrary() {
       <td>${badgeHtml(w)}</td>
       <td>${badgeHtml(d)}</td>
       <td>${badgeHtml(l)}</td>
-      <td><div class="inline-actions"><button class="secondary" data-open-suno="${escapeHtml(song.clipId)}">Suno</button>${song.localDir ? `<button class="secondary" data-open-local="${escapeHtml(song.clipId)}">本地</button>` : ''}</div></td>
+      <td><div class="inline-actions"><button class="secondary" data-play-song="${escapeHtml(song.clipId)}" ${isSongComplete(song) || song.audioUrl || song.sourceWavPath || song.processedWavPath ? '' : 'disabled'}>试听</button><button class="secondary" data-open-suno="${escapeHtml(song.clipId)}">Suno</button>${song.localDir ? `<button class="secondary" data-open-local="${escapeHtml(song.clipId)}">本地</button>` : ''}</div></td>
     </tr>`;
   }).join('');
 
@@ -199,12 +279,14 @@ function renderSongLibrary() {
       syncMasterCheck();
     };
   });
+  body.querySelectorAll('[data-play-song]').forEach(btn => btn.onclick = () => playSongFromLibrary(btn.dataset.playSong));
   body.querySelectorAll('[data-open-suno]').forEach(btn => btn.onclick = () => window.demoApi.openSong(`https://suno.com/song/${btn.dataset.openSuno}`));
   body.querySelectorAll('[data-open-local]').forEach(btn => btn.onclick = async () => {
     try { await window.demoApi.openSongLocalDir(btn.dataset.openLocal); }
     catch (e) { libraryLog(e?.message || e, 'err'); }
   });
   syncMasterCheck();
+  refreshPlayerUi();
 }
 
 function syncMasterCheck() {
@@ -224,6 +306,38 @@ async function loadSongLibrary(refreshFromSuno = false) {
     libraryLog(e?.message || e, 'err');
   }
 }
+
+$('libraryPlayerToggle').onclick = async () => {
+  if (!playingClipId || !libraryAudio.src) return;
+  try {
+    if (libraryAudio.paused) await libraryAudio.play();
+    else libraryAudio.pause();
+  } catch (e) {
+    libraryLog(e?.message || e, 'err');
+  }
+  refreshPlayerUi();
+};
+
+$('libraryPlayerStop').onclick = () => {
+  libraryAudio.pause();
+  try { libraryAudio.currentTime = 0; } catch {}
+  refreshPlayerUi();
+};
+
+$('libraryPlayerSeek').addEventListener('input', () => {
+  playerSeeking = true;
+  const value = Number($('libraryPlayerSeek').value || 0);
+  $('libraryPlayerTime').textContent = `${formatPlayerTime(value)} / ${formatPlayerTime(libraryAudio.duration)}`;
+});
+$('libraryPlayerSeek').addEventListener('change', () => {
+  const value = Number($('libraryPlayerSeek').value || 0);
+  if (Number.isFinite(value)) libraryAudio.currentTime = value;
+  playerSeeking = false;
+  refreshPlayerUi();
+});
+$('libraryPlayerVolume').addEventListener('input', () => {
+  libraryAudio.volume = Math.max(0, Math.min(1, Number($('libraryPlayerVolume').value || 0) / 100));
+});
 
 $('libraryRefresh').onclick = async () => {
   if (libraryBusy) return;
