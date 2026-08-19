@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - skip-completed-deai-v0.5.3
+      - song-list-player-v0.5.4
     paths:
       - 'bootstrap.js'
       - 'main.js'
@@ -17,11 +17,13 @@ on:
       - 'package.json'
       - 'tools/apply_negative_style_patch.js'
       - 'tools/apply_skip_completed_deai_patch.js'
+      - 'tools/apply_song_player_patch.js'
       - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
       - 'THIRD_PARTY_N19.md'
       - 'V0.5_SONG_LIBRARY.md'
       - 'V0.5.2_NEGATIVE_STYLE.md'
       - 'V0.5.3_NO_REPEAT_DEAI.md'
+      - 'V0.5.4_SONG_PLAYER.md'
       - 'PROFILE_PERSISTENCE.md'
       - 'BUGFIX_PLAN_v0.5.1.md'
       - 'PROFILE_MIGRATION_NOTES.md'
@@ -44,11 +46,12 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.3_Windows
-          exe=SunoOriginalStudio_v0.5.3.exe
+          artifact=SunoOriginalStudio_v0.5.4_Windows
+          exe=SunoOriginalStudio_v0.5.4.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
+          song_player=true
           suno_wav_pipeline=true
           stable_session_profile=true
           negative_style=true
@@ -59,7 +62,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Start SunoOriginalStudio v0.5.3 build ${{ github.run_id }}"
+            git commit -m "Start SunoOriginalStudio v0.5.4 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Build status already current.'
@@ -82,6 +85,20 @@ jobs:
             git push
           } else {
             Write-Host 'v0.5.3 source patch already committed.'
+          }
+
+      - name: Apply v0.5.4 song player patch
+        shell: pwsh
+        run: |
+          node tools/apply_song_player_patch.js
+          if ($LASTEXITCODE -ne 0) { throw 'v0.5.4 song player patch failed' }
+          git add main.js renderer.js song_library.js preload.js index.html package.json PROJECT_STATUS_AND_AVR_FEATURES.md
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 1) {
+            git commit -m "Add song-list player in v0.5.4"
+            git push
+          } else {
+            Write-Host 'v0.5.4 song player patch already committed.'
           }
 
       - name: Install JavaScript dependencies
@@ -149,6 +166,7 @@ jobs:
           node --check renderer.js
           node --check tools/apply_negative_style_patch.js
           node --check tools/apply_skip_completed_deai_patch.js
+          node --check tools/apply_song_player_patch.js
 
       - name: Build portable EXE
         run: npm run dist
@@ -159,7 +177,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.3.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.4.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -179,23 +197,23 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.3_Windows
-          path: dist/SunoOriginalStudio_v0.5.3.exe
+          name: SunoOriginalStudio_v0.5.4_Windows
+          path: dist/SunoOriginalStudio_v0.5.4.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.3
-          name: Suno Original Studio v0.5.3
+          tag_name: suno-original-studio-v0.5.4
+          name: Suno Original Studio v0.5.4
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.5.3.exe
+          files: dist/SunoOriginalStudio_v0.5.4.exe
           body: |
-            Already AI-cleaned songs are never processed again, even if their clip IDs are submitted again.
-            The song list also disables selection for completed N19 songs and reports skipped counts.
-            Keeps persistent login sessions, negative style, song library, Suno WAV workflow, and exact AVR 1.77.0 N19 processing.
+            Adds an integrated music player to the song list with play/pause, stop, seek, time display and volume control.
+            Playback prefers the local N19 WAV, then the local Suno original WAV, then the Suno online audio/CDN source.
+            Keeps persistent login sessions, negative style, no-repeat AI cleaning, Suno WAV workflow, and exact AVR 1.77.0 N19 processing.
 
       - name: Report successful build
         shell: pwsh
@@ -204,11 +222,12 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.3_Windows
-          exe=SunoOriginalStudio_v0.5.3.exe
+          artifact=SunoOriginalStudio_v0.5.4_Windows
+          exe=SunoOriginalStudio_v0.5.4.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
+          song_player=true
           suno_wav_pipeline=true
           stable_session_profile=true
           negative_style=true
@@ -217,7 +236,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Finish SunoOriginalStudio v0.5.3 build ${{ github.run_id }}"
+            git commit -m "Finish SunoOriginalStudio v0.5.4 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Success status already current.'
