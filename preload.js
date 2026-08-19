@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('demoApi', {
   selectSongRoot: () => ipcRenderer.invoke('library:select-root'),
   openSongRoot: () => ipcRenderer.invoke('library:open-root'),
   openSongLocalDir: (clipId) => ipcRenderer.invoke('library:open-song-dir', clipId),
+  getSongPlaySource: (clipId) => ipcRenderer.invoke('library:get-play-source', clipId),
   processSelectedSongs: (clipIds) => ipcRenderer.invoke('library:process-selected', clipIds),
   onSongLibraryChanged: (handler) => {
     const listener = (_event, payload) => handler(payload);

@@ -1,10 +1,13 @@
 const fs = require('fs');
 
+const VERSION_LABELS = new Set(['window version', 'page version', 'package version', 'artifact name']);
+
 function patchFile(file, transforms) {
   let text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   let changed = false;
   for (const { from, to, label } of transforms) {
     if (text.includes(to)) continue;
+    if (VERSION_LABELS.has(label) && /0\.5\.[4-9]/.test(text)) continue;
     if (!text.includes(from)) throw new Error(`${file}: cannot find expected source for ${label}`);
     text = text.replace(from, to);
     changed = true;

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
 const { BrowserWindow, session } = require('electron');
 
@@ -443,6 +444,57 @@ async function processSelectedSongs(app, clipIds, sender) {
   };
 }
 
+function getSongPlaySource(app, clipId) {
+  const state = readState(app);
+  const song = state.songs.find(x => x.clipId === clipId);
+  if (!song) throw new Error('歌曲列表中没有找到这首歌');
+
+  const localCandidates = [
+    { file: song.processedWavPath, kind: 'n19', label: 'AI消痕版 WAV' },
+    { file: song.sourceWavPath, kind: 'suno-wav', label: 'Suno 原始 WAV' },
+  ];
+  for (const candidate of localCandidates) {
+    if (candidate.file && fs.existsSync(candidate.file)) {
+      try {
+        if (fs.statSync(candidate.file).size > 0) {
+          return {
+            clipId: song.clipId,
+            title: song.title || '未命名',
+            url: pathToFileURL(candidate.file).href,
+            kind: candidate.kind,
+            label: candidate.label,
+            local: true,
+          };
+        }
+      } catch {}
+    }
+  }
+
+  if (song.audioUrl) {
+    return {
+      clipId: song.clipId,
+      title: song.title || '未命名',
+      url: song.audioUrl,
+      kind: 'suno-stream',
+      label: 'Suno 在线音频',
+      local: false,
+    };
+  }
+
+  if (/^(complete|completed)$/i.test(String(song.generationStatus || '')) && song.clipId) {
+    return {
+      clipId: song.clipId,
+      title: song.title || '未命名',
+      url: `https://cdn1.suno.ai/${encodeURIComponent(song.clipId)}.mp3`,
+      kind: 'suno-cdn',
+      label: 'Suno 在线音频',
+      local: false,
+    };
+  }
+
+  throw new Error('这首歌还没有可试听的音频，请先刷新 Suno 状态');
+}
+
 function registerSongLibraryIpc({ app, ipcMain, dialog, shell }) {
   ipcMain.handle('library:list', async () => readState(app));
   ipcMain.handle('library:save-submission', async (_event, payload) => saveSubmission(app, payload || {}));
@@ -462,6 +514,7 @@ function registerSongLibraryIpc({ app, ipcMain, dialog, shell }) {
     if (error) throw new Error(error);
     return true;
   });
+  ipcMain.handle('library:get-play-source', async (_event, clipId) => getSongPlaySource(app, clipId));
   ipcMain.handle('library:open-song-dir', async (_event, clipId) => {
     const state = readState(app);
     const song = state.songs.find(x => x.clipId === clipId);

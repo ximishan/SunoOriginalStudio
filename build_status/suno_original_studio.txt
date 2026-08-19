@@ -1,10 +1,11 @@
 status=success
-run_id=32240621653
-artifact=SunoOriginalStudio_v0.5.3_Windows
-exe=SunoOriginalStudio_v0.5.3.exe
-source_sha=31d4bfca8f151527b8a172bf45cad543f673dcf3
+run_id=32250942161
+artifact=SunoOriginalStudio_v0.5.4_Windows
+exe=SunoOriginalStudio_v0.5.4.exe
+source_sha=88800916153ed330600a3a74a450b6d786408f3b
 exact_n19_toolchain=true
 song_library=true
+song_player=true
 suno_wav_pipeline=true
 stable_session_profile=true
 negative_style=true

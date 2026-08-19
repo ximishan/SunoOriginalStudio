@@ -23,7 +23,7 @@ SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是�
 
 ## 二、当前版本与状态
 
-当前开发版本：`v0.4.0`
+当前开发版本：`v0.5.4`
 
 仓库：`ximishan/SunoOriginalStudio`
 
@@ -41,6 +41,11 @@ SunoOriginalStudio 是独立的 Windows Electron 桌面工具，核心目标是�
 - `v0.2.0`：重做人机验证为官方 Challenge → Token → 原任务自动续提
 - `v0.3.0`：把独立版 FFmpeg-only N19 兼容实现集成进主程序
 - `v0.4.0`：将 AI 消痕升级为 AVR 1.77.0 原版完整 `SoX + Rubber Band + FFmpeg` 工具链与执行路径，并增加构建时、运行时 SHA-256 校验
+- `v0.5.0`：新增持久化歌曲列表、Suno WAV 下载、歌曲列表直达 N19 与歌词/原始 WAV/消痕 WAV 本地保存
+- `v0.5.1`：固定用户数据目录并增强旧 Session 迁移
+- `v0.5.2`：新增“排除风格 / negative_tags”
+- `v0.5.3`：已完成 AI 消痕的歌曲前后端双重跳过，避免重复处理；增强 Clerk 登录状态持久化与识别
+- `v0.5.4`：歌曲列表新增内置试听播放器，支持 Suno 在线音频、原始 WAV 和 N19 消痕 WAV 播放
 
 当前最高优先级：**先把 v0.4.0 精确 N19 链路实机跑稳，再继续自动下载、自动消痕和 Excel 批量原创。**
 
