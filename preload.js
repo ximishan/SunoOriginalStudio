@@ -11,4 +11,16 @@ contextBridge.exposeInMainWorld('demoApi', {
     ipcRenderer.on('verification:state', listener);
     return () => ipcRenderer.removeListener('verification:state', listener);
   },
+
+  getDeaiEngineInfo: () => ipcRenderer.invoke('deai:engine-info'),
+  selectDeaiFiles: () => ipcRenderer.invoke('deai:select-files'),
+  selectDeaiOutputDir: () => ipcRenderer.invoke('deai:select-output-dir'),
+  processDeai: (payload) => ipcRenderer.invoke('deai:process', payload),
+  cancelDeai: () => ipcRenderer.invoke('deai:cancel'),
+  openDeaiOutputDir: (outputDir) => ipcRenderer.invoke('deai:open-output-dir', outputDir),
+  onDeaiProgress: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('deai:progress', listener);
+    return () => ipcRenderer.removeListener('deai:progress', listener);
+  },
 });
