@@ -2,33 +2,93 @@
 
 独立的 Suno 原创歌曲 Windows 桌面工具。
 
-## 当前版本：v0.5.0
+## 当前版本：v0.5.4
 
-当前已包含：
+当前已经包含：
 
 - 3 个独立、持久化的 Suno 账号 Session
+- 固定用户数据目录 `%APPDATA%\SunoOriginalStudio`
+- 旧版本账号 Session / `Local State` 迁移
+- Clerk 登录状态增强识别与 Cookie/Storage 主动落盘
 - 自定义歌名、完整歌词、风格提示词
-- 原创歌曲提交与任务状态查询
+- 独立“排除风格”，通过 `negative_tags` 提交
+- v5.5 / v5 / v4.5+ / v4.5-all 模型选择
+- 男声 / 女声、Weirdness、Style Influence
+- 原创歌曲提交与状态查询
 - Suno 官方 hCaptcha / Cloudflare Turnstile 验证衔接
 - 验证完成后自动续提原创任务
-- 持久化“歌曲列表”：每个 Suno clip 单独记录版本、账号、歌名、歌词与生成状态
+- 持久化“歌曲列表”：每个 Suno clip 单独记录版本、账号、歌名、歌词、风格、排除风格与生成状态
 - 歌曲列表记录 WAV 下载状态、AI 消痕状态、本地保存状态
 - 已生成歌曲可直接从列表勾选进行 AI 消痕
 - 自动请求 Suno WAV：`convert_wav` → `wav_file`
 - 每首歌曲独立目录保存 `歌词.txt`、`<歌名>-Suno原始.wav`、`<歌名>-消痕-N19.wav`
 - 可配置统一作品保存目录，默认 `文档/SunoOriginalStudio作品`
+- 已完成 AI 消痕的歌曲前端禁选 + 后端强制跳过，不会重复处理
 - AVR 1.77.0 N19 原版完整执行链路：SoX → 节点间响度对齐 → FFmpeg 节点 9（Rubber Band）→ 组合后处理
-- Windows 构建和程序运行时都会校验 N19 工具链 SHA-256，只有与 AVR 1.77.0 中观察到的 SoX / FFmpeg 文件一致才允许执行
-- 保留独立“AI 消痕”页面，支持手动本地多文件处理
+- Windows 构建和程序运行时都会校验 N19 工具链 SHA-256
+- 独立“AI 消痕”页面，支持本地多文件处理
+- 歌曲列表内置试听播放器
+- 试听支持播放/暂停、停止、进度拖动、时间显示、音量调节
+- 播放源优先级：N19 WAV → Suno 原始 WAV → Suno `audio_url` → CDN MP3 fallback
 
-项目完整规划和 AVR 功能对照见：`PROJECT_STATUS_AND_AVR_FEATURES.md`。
+## 当前还没有完成
 
-v0.5.0 歌曲列表与自动保存流程见：`V0.5_SONG_LIBRARY.md`。
+- 后台自动轮询 Suno 生成状态
+- 生成完成后自动下载 WAV
+- 生成完成后自动保存歌词 + WAV
+- 下载完成后可选自动 N19
+- Excel 批量原创
+- 3 账号自动轮流调度
+- 单账号 busy 锁
+- checkpoint / 重启恢复批量队列
+- 失败任务重试
+- 登录成功自动返回主界面
+- 单账号退出/清除
+- Instrumental 纯音乐开关
+- Voice / Persona
 
-N19 精确工具链、哈希和阶段参数见：`THIRD_PARTY_N19.md`。
+## 下一步
+
+### v0.5.5：统一 Suno Session / Auth Token
+
+当前主界面登录状态已经使用 Clerk 长期 Session 判断，但歌曲列表内部 WAV 请求仍有短生命周期 `__session` 的前置判断。下一版先把 `main.js`、`song_library.js` 与以后批量模块的 token 获取统一为共享模块，避免出现“主界面显示已登录，但歌曲列表接口又说未登录”的情况。
+
+### v0.5.6：自动轮询 + 自动下载 + 可选自动 AI 消痕
+
+目标链路：
+
+```text
+提交原创
+→ 歌曲列表
+→ 后台自动轮询
+→ 生成完成
+→ 自动下载 Suno WAV
+→ 自动保存歌词
+→ 可选自动 AVR N19
+→ 最终本地作品目录
+```
+
+### v0.6.0：Excel 批量原创 + 3 账号调度
+
+计划支持 Excel 导入、多任务队列、账号 1→2→3 轮流、单账号 busy 锁、官方验证时只暂停对应账号、checkpoint、重启恢复与结果导出。
+
+完整“已做 / 未做 / 已知问题 / 下一步怎么实现”请以：
+
+`PROJECT_STATUS_AND_AVR_FEATURES.md`
+
+为主状态文档。
+
+其他文档：
+
+- `V0.5_SONG_LIBRARY.md`：歌曲列表与 Suno WAV / 本地保存流程
+- `V0.5.2_NEGATIVE_STYLE.md`：排除风格
+- `V0.5.3_NO_REPEAT_DEAI.md`：已消痕歌曲防重复处理
+- `V0.5.4_SONG_PLAYER.md`：歌曲列表试听播放器
+- `PROFILE_PERSISTENCE.md`：账号 Profile / Session 持久化
+- `THIRD_PARTY_N19.md`：N19 工具链、哈希、阶段与第三方说明
 
 > 人机验证只衔接 Suno 官方验证流程，不做验证码破解、识别、代答或绕过。
 >
-> 歌曲列表的 Suno WAV 下载不会静默降级成 MP3；如果当前 Suno 账号没有 WAV 导出权限，会记录明确的下载失败状态。
+> 歌曲列表的 Suno WAV 下载不会静默降级成 MP3；如果当前 Suno 账号没有 WAV 导出权限，会记录明确失败状态。
 >
-> N19 使用与观察到的 AVR 1.77.0 相同工具链、阶段顺序和参数。由于原链路本身包含 SoX `dither -s`，独立运行之间不承诺最终 WAV 的文件哈希绝对一致。
+> N19 使用与观察到的 AVR 1.77.0 相同工具链、阶段顺序和参数。由于原链路包含 SoX `dither -s`，独立运行之间不承诺最终 WAV 文件哈希绝对一致。
