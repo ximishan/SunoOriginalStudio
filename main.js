@@ -6,7 +6,9 @@ const SUNO_HOME = 'https://suno.com/';
 const SUNO_CREATE = 'https://suno.com/create';
 const SUNO_STUDIO = 'https://suno.com/studio';
 const SUNO_API = 'https://studio-api-prod.suno.com';
-const VERIFICATION_TIMEOUT_MS = 180000;
+const VERIFICATION_TIMEOUT_MS = 300000;
+const TURNSTILE_SITEKEY = '0x4AAAAAADI7xDNyj-3LcIbi';
+const HCAPTCHA_SITEKEY = 'd65453de-3f1a-4aac-9366-a0f06e52b2ce';
 const MODEL_MAP = {
   'v5.5': 'chirp-fenix',
   'v5': 'chirp-crow',
@@ -16,6 +18,7 @@ const MODEL_MAP = {
 
 let mainWindow;
 const accountWindows = new Map();
+const verificationActiveSlots = new Set();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -90,6 +93,7 @@ async function ensureAccountWindow(slot, show = false, target = SUNO_HOME) {
     }
     return win;
   }
+
   const partition = partitionFor(slot);
   win = new BrowserWindow({
     width: 1320,
@@ -135,10 +139,11 @@ async function waitReady(win, timeoutMs = 30000) {
 }
 
 async function accountStatus(slot) {
+  slot = String(slot);
   const ses = session.fromPartition(partitionFor(slot));
   const cookies = await ses.cookies.get({ url: SUNO_HOME });
   let loggedIn = cookies.some(c => c.name === '__session' || c.name.startsWith('__session_'));
-  const win = accountWindows.get(String(slot));
+  const win = accountWindows.get(slot);
   if (loggedIn && win && !win.isDestroyed() && win.webContents.getURL().startsWith('https://suno.com/')) {
     try {
       const state = await win.webContents.executeJavaScript(`(() => {
@@ -148,7 +153,13 @@ async function accountStatus(slot) {
       if (typeof state === 'boolean') loggedIn = state;
     } catch {}
   }
-  return { slot: String(slot), loggedIn, partition: partitionFor(slot), windowOpen: !!(win && !win.isDestroyed()) };
+  return {
+    slot,
+    loggedIn,
+    partition: partitionFor(slot),
+    windowOpen: !!(win && !win.isDestroyed()),
+    verificationActive: verificationActiveSlots.has(slot),
+  };
 }
 
 async function getAuthToken(slot) {
@@ -170,12 +181,16 @@ async function getAuthToken(slot) {
     }));
     return cookie.__session || Object.entries(cookie).find(([k]) => k.startsWith('__session'))?.[1] || '';
   })()`);
-  if (!String(token || '').trim()) throw new Error(`账号 ${slot} 尚未登录，请先点击“登录/打开”完成 Suno 登录`);
+  if (!String(token || '').trim()) {
+    throw new Error(`账号 ${slot} 尚未登录，请先点击“登录/打开”完成 Suno 登录`);
+  }
   return String(token).trim();
 }
 
 function browserToken() {
-  return JSON.stringify({ token: Buffer.from(JSON.stringify({ timestamp: Date.now() }), 'utf8').toString('base64') });
+  return JSON.stringify({
+    token: Buffer.from(JSON.stringify({ timestamp: Date.now() }), 'utf8').toString('base64'),
+  });
 }
 
 async function apiHeaders(slot) {
@@ -199,95 +214,394 @@ async function precheckVerification(slot, headers) {
       headers,
       body: JSON.stringify({ ctype: 'generation' }),
     });
-    if (!res.ok) return { known: false, required: false, httpStatus: res.status };
+    if (!res.ok) {
+      return { known: false, required: false, httpStatus: res.status, captchaProvider: 2 };
+    }
     const data = await res.json().catch(() => ({}));
+    const captchaProvider = Number(data.captcha_version) === 1 ? 1 : 2;
     return {
       known: true,
       required: !!data.required,
       captchaVersion: data.captcha_version,
+      captchaProvider,
     };
   } catch (e) {
-    return { known: false, required: false, error: String(e?.message || e) };
+    return {
+      known: false,
+      required: false,
+      captchaProvider: 2,
+      error: String(e?.message || e),
+    };
   }
 }
 
-async function showVerificationWindow(slot, title = '') {
+async function detectCaptchaProvider(slot, headers) {
+  const check = await precheckVerification(slot, headers);
+  return Number(check.captchaProvider) === 1 ? 1 : 2;
+}
+
+function buildTurnstileVerificationScript() {
+  return `(() => new Promise((resolve, reject) => {
+    const overlayId = '__suno_original_verification';
+    document.getElementById(overlayId)?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = overlayId;
+    Object.assign(overlay.style, {
+      position: 'fixed', inset: '0', zIndex: '2147483647',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      justifyContent: 'center', gap: '14px', background: 'rgba(0,0,0,.80)',
+      color: '#fff', fontFamily: 'system-ui, sans-serif'
+    });
+
+    const title = document.createElement('div');
+    title.textContent = '请完成 Suno 官方 Cloudflare 人机验证';
+    title.style.cssText = 'font-size:17px;font-weight:700';
+    const status = document.createElement('div');
+    status.textContent = '正在加载官方验证组件…';
+    status.style.cssText = 'font-size:13px;color:rgba(255,255,255,.78)';
+    const container = document.createElement('div');
+    container.id = '__suno_original_turnstile';
+    container.style.minHeight = '72px';
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:10px;margin-top:4px';
+    const retryButton = document.createElement('button');
+    retryButton.textContent = '重新加载验证';
+    retryButton.style.cssText = 'display:none;padding:8px 14px;border:0;border-radius:8px;background:#5b6cff;color:#fff;cursor:pointer';
+    const cancelButton = document.createElement('button');
+    cancelButton.textContent = '取消当前任务';
+    cancelButton.style.cssText = 'padding:8px 14px;border:1px solid #666;border-radius:8px;background:#242424;color:#fff;cursor:pointer';
+    actions.append(retryButton, cancelButton);
+    overlay.append(title, status, container, actions);
+    document.body.appendChild(overlay);
+
+    let widgetId;
+    let settled = false;
+    let retryCount = 0;
+    let retryTimer;
+    let timeoutTimer;
+
+    const cleanup = () => {
+      clearTimeout(retryTimer);
+      clearTimeout(timeoutTimer);
+      try {
+        if (widgetId !== undefined && window.turnstile) window.turnstile.remove(widgetId);
+      } catch {}
+      overlay.remove();
+    };
+
+    const finish = (token, error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(new Error(error));
+      else resolve(token);
+    };
+
+    const armTimeout = () => {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = setTimeout(() => finish(null, 'Suno 人机验证等待超过 5 分钟'), ${VERIFICATION_TIMEOUT_MS});
+    };
+
+    const retry = (reason) => {
+      if (settled) return;
+      retryCount += 1;
+      if (retryCount > 3) {
+        status.textContent = reason + '。请检查网络后点击“重新加载验证”。';
+        retryButton.style.display = 'inline-block';
+        return;
+      }
+      status.textContent = reason + '，自动重试 ' + retryCount + '/3…';
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        try {
+          if (widgetId !== undefined && window.turnstile) {
+            try { window.turnstile.remove(widgetId); } catch {}
+            widgetId = undefined;
+          }
+          loadScript();
+        } catch (error) {
+          retry(error instanceof Error ? error.message : String(error));
+        }
+      }, 1000 * retryCount);
+    };
+
+    const render = () => {
+      try {
+        status.textContent = '请在下方完成 Cloudflare 验证；通过后任务会自动继续。';
+        retryButton.style.display = 'none';
+        widgetId = window.turnstile.render('#__suno_original_turnstile', {
+          sitekey: ${JSON.stringify(TURNSTILE_SITEKEY)},
+          appearance: 'always',
+          callback: value => finish(value),
+          'error-callback': code => retry('验证组件出错：' + (code || 'unknown')),
+          'expired-callback': () => retry('验证已过期'),
+          'timeout-callback': () => retry('验证操作超时'),
+          'unsupported-callback': () => finish(null, '当前环境不支持 Suno Cloudflare 验证'),
+          'before-interactive-callback': () => { status.textContent = '请完成下方 Cloudflare 验证…'; },
+          'after-interactive-callback': () => { status.textContent = '验证已提交，正在等待结果…'; },
+        });
+      } catch (error) {
+        retry(error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    const loadScript = () => {
+      if (window.turnstile?.render) {
+        render();
+        return;
+      }
+      document.querySelector('script[data-suno-original-turnstile]')?.remove();
+      const script = document.createElement('script');
+      script.dataset.sunoOriginalTurnstile = '1';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.onload = render;
+      script.onerror = () => retry('无法加载 Cloudflare 官方验证组件');
+      document.head.appendChild(script);
+    };
+
+    retryButton.onclick = () => {
+      retryCount = 0;
+      retryButton.style.display = 'none';
+      if (widgetId !== undefined && window.turnstile) {
+        try { window.turnstile.remove(widgetId); } catch {}
+        widgetId = undefined;
+      }
+      armTimeout();
+      loadScript();
+    };
+    cancelButton.onclick = () => finish(null, '用户取消了 Suno 人机验证');
+
+    armTimeout();
+    loadScript();
+  }))()`;
+}
+
+function buildHcaptchaVerificationScript() {
+  return `(() => new Promise((resolve, reject) => {
+    const overlayId = '__suno_original_verification';
+    document.getElementById(overlayId)?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = overlayId;
+    Object.assign(overlay.style, {
+      position: 'fixed', left: '50%', top: '18px', transform: 'translateX(-50%)',
+      zIndex: '2147483647', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', gap: '10px', padding: '16px 22px',
+      borderRadius: '14px', background: 'rgba(20,24,34,.97)', color: '#fff',
+      fontFamily: 'system-ui, sans-serif', boxShadow: '0 12px 40px rgba(0,0,0,.45)',
+      maxWidth: '92vw'
+    });
+
+    const title = document.createElement('div');
+    title.textContent = '请完成 Suno 官方 hCaptcha 验证';
+    title.style.cssText = 'font-size:16px;font-weight:700';
+    const status = document.createElement('div');
+    status.textContent = '正在加载官方验证组件…';
+    status.style.cssText = 'font-size:13px;color:rgba(255,255,255,.78)';
+    const container = document.createElement('div');
+    container.id = '__suno_original_hcaptcha';
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:10px';
+    const retryButton = document.createElement('button');
+    retryButton.textContent = '重新加载验证';
+    retryButton.style.cssText = 'display:none;padding:8px 14px;border:0;border-radius:8px;background:#5b6cff;color:#fff;cursor:pointer';
+    const cancelButton = document.createElement('button');
+    cancelButton.textContent = '取消当前任务';
+    cancelButton.style.cssText = 'padding:8px 14px;border:1px solid #666;border-radius:8px;background:#242424;color:#fff;cursor:pointer';
+    actions.append(retryButton, cancelButton);
+    overlay.append(title, status, container, actions);
+    document.body.appendChild(overlay);
+
+    const env = 'prod';
+    let widgetId;
+    let settled = false;
+    let retryCount = 0;
+    let retryTimer;
+    let timeoutTimer;
+
+    const cleanup = () => {
+      clearTimeout(retryTimer);
+      clearTimeout(timeoutTimer);
+      try {
+        if (widgetId !== undefined && window.hcaptcha) window.hcaptcha.remove(widgetId);
+      } catch {}
+      overlay.remove();
+      try { delete window.__sunoOriginalHcaptchaOnLoad; } catch {}
+    };
+
+    const finish = (token, error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(new Error(error));
+      else resolve(token);
+    };
+
+    const armTimeout = () => {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = setTimeout(() => finish(null, 'Suno 人机验证等待超过 5 分钟'), ${VERIFICATION_TIMEOUT_MS});
+    };
+
+    const retry = (reason) => {
+      if (settled) return;
+      retryCount += 1;
+      if (retryCount > 3) {
+        status.textContent = reason + '。请检查网络后点击“重新加载验证”。';
+        retryButton.style.display = 'inline-block';
+        return;
+      }
+      status.textContent = reason + '，自动重试 ' + retryCount + '/3…';
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        try {
+          if (window.hcaptcha?.reset && widgetId !== undefined) {
+            try { window.hcaptcha.reset(widgetId); } catch {}
+            window.hcaptcha.execute(widgetId);
+          } else {
+            loadScript();
+          }
+        } catch (error) {
+          retry(error instanceof Error ? error.message : String(error));
+        }
+      }, 1000 * retryCount);
+    };
+
+    const render = () => {
+      try {
+        status.textContent = '正在进行 hCaptcha 验证；需要操作时会弹出官方挑战。';
+        retryButton.style.display = 'none';
+        widgetId = window.hcaptcha.render(container, {
+          sitekey: ${JSON.stringify(HCAPTCHA_SITEKEY)},
+          size: 'invisible',
+          callback: value => finish(value),
+          'error-callback': code => retry('验证组件出错：' + (code || 'unknown')),
+          'expired-callback': () => retry('验证已过期'),
+          'chalexpired-callback': () => retry('验证挑战已过期'),
+          'open-callback': () => { status.textContent = '请完成弹出的 hCaptcha 挑战…'; },
+          'close-callback': () => { status.textContent = '验证窗口已关闭，正在确认结果…'; },
+        });
+        window.hcaptcha.execute(widgetId);
+      } catch (error) {
+        retry(error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    const loadScript = () => {
+      if (window.hcaptcha?.render) {
+        render();
+        return;
+      }
+      document.querySelector('script[data-suno-original-hcaptcha]')?.remove();
+      const query = new URLSearchParams({
+        onload: '__sunoOriginalHcaptchaOnLoad',
+        render: 'explicit',
+        endpoint: 'https://hcaptcha-endpoint-' + env + '.suno.com',
+        assethost: 'https://hcaptcha-assets-' + env + '.suno.com',
+        imghost: 'https://hcaptcha-imgs-' + env + '.suno.com',
+        reportapi: 'https://hcaptcha-reportapi-' + env + '.suno.com',
+      });
+      window.__sunoOriginalHcaptchaOnLoad = () => { if (!settled) render(); };
+      const script = document.createElement('script');
+      script.dataset.sunoOriginalHcaptcha = '1';
+      script.src = 'https://hcaptcha-endpoint-' + env + '.suno.com/1/api.js?' + query.toString();
+      script.async = true;
+      script.defer = true;
+      script.onerror = () => retry('无法加载 hCaptcha 官方验证组件');
+      document.head.appendChild(script);
+    };
+
+    retryButton.onclick = () => {
+      retryCount = 0;
+      retryButton.style.display = 'none';
+      if (widgetId !== undefined && window.hcaptcha) {
+        try { window.hcaptcha.remove(widgetId); } catch {}
+        widgetId = undefined;
+      }
+      armTimeout();
+      loadScript();
+    };
+    cancelButton.onclick = () => finish(null, '用户取消了 Suno 人机验证');
+
+    armTimeout();
+    loadScript();
+  }))()`;
+}
+
+async function runOfficialVerification(slot, provider, title = '') {
+  slot = String(slot);
+  provider = Number(provider) === 1 ? 1 : 2;
   const win = await ensureAccountWindow(slot, true, SUNO_CREATE);
   if (!win.webContents.getURL().startsWith(SUNO_CREATE)) await win.loadURL(SUNO_CREATE);
-  await waitReady(win).catch(() => {});
+  await waitReady(win, 30000);
+
+  verificationActiveSlots.add(slot);
   if (win.isMinimized()) win.restore();
+  win.setTitle(`Suno 人机验证 — 账号 ${slot}`);
   win.show();
   win.focus();
   win.moveTop();
   win.setAlwaysOnTop(true, 'floating');
+  emitVerification({
+    state: 'required',
+    slot,
+    title,
+    provider,
+    message: provider === 1
+      ? '已打开账号窗口，正在加载 Suno 官方 hCaptcha。'
+      : '已打开账号窗口，正在加载 Suno 官方 Cloudflare Turnstile。',
+  });
 
-  // 只负责把 Suno 官方验证页面置前并给出提示；不识别、不点击、不绕过验证码。
   try {
-    await win.webContents.executeJavaScript(`(() => {
-      const id = '__suno_demo_verify_banner';
-      document.getElementById(id)?.remove();
-      const el = document.createElement('div');
-      el.id = id;
-      el.style.cssText = 'position:fixed;z-index:2147483647;left:16px;right:16px;top:16px;padding:14px 18px;border-radius:12px;background:#18181b;color:#fff;font:14px/1.5 system-ui;box-shadow:0 8px 30px rgba(0,0,0,.45);border:1px solid #3f3f46';
-      el.textContent = ${JSON.stringify('Suno 要求人机验证。请在此窗口完成 Suno 官方验证；完成后无需返回点击，Demo 会自动检测并继续提交。')};
-      document.documentElement.appendChild(el);
-      return true;
-    })()`);
-  } catch {}
-
-  emitVerification({ state: 'required', slot: String(slot), title, message: '已打开并置顶对应 Suno 账号窗口，等待你完成人机验证。验证通过后会自动继续。' });
-  return win;
-}
-
-async function waitForHumanVerification(slot, title = '') {
-  const win = await showVerificationWindow(slot, title);
-  const deadline = Date.now() + VERIFICATION_TIMEOUT_MS;
-  let clearCount = 0;
-  let lastEmit = 0;
-
-  while (Date.now() < deadline) {
-    if (win.isDestroyed()) throw new Error('人机验证窗口被关闭，已停止当前任务，避免重复提交。');
-
-    const headers = await apiHeaders(slot);
-    const check = await precheckVerification(slot, headers);
-
-    if (check.known && !check.required) {
-      clearCount += 1;
-      if (clearCount >= 2) {
-        try { win.setAlwaysOnTop(false); } catch {}
-        try { win.hide(); } catch {}
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.show();
-          mainWindow.focus();
-          mainWindow.moveTop();
-        }
-        emitVerification({ state: 'passed', slot: String(slot), title, message: 'Suno 人机验证已通过，正在自动继续刚才的原创任务。' });
-        return;
-      }
-    } else {
-      clearCount = 0;
+    const script = provider === 1
+      ? buildHcaptchaVerificationScript()
+      : buildTurnstileVerificationScript();
+    const token = await win.webContents.executeJavaScript(script);
+    if (!String(token || '').trim()) throw new Error('Suno 人机验证没有返回有效 token');
+    emitVerification({
+      state: 'passed',
+      slot,
+      title,
+      provider,
+      message: 'Suno 官方验证已通过，正在自动继续刚才的原创任务。',
+    });
+    return { token: String(token), tokenProvider: provider };
+  } finally {
+    verificationActiveSlots.delete(slot);
+    try { win.setAlwaysOnTop(false); } catch {}
+    try { win.setTitle(`Suno 账号 ${slot}`); } catch {}
+    try { win.hide(); } catch {}
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.moveTop();
     }
-
-    if (Date.now() - lastEmit > 5000) {
-      lastEmit = Date.now();
-      emitVerification({ state: 'waiting', slot: String(slot), title, message: '仍在等待 Suno 官方人机验证完成……' });
-    }
-    await sleep(2000);
   }
-
-  try { win.setAlwaysOnTop(false); } catch {}
-  throw new Error('等待 Suno 人机验证超过 3 分钟，当前任务已停止。请完成验证后重新提交。');
 }
 
-function buildOriginalPayload(input) {
+function buildOriginalPayload(input, verification = {}) {
   const sliders = {};
-  if (Number.isFinite(Number(input.weirdness))) sliders.weirdness_constraint = Math.max(0, Math.min(1, Number(input.weirdness) / 100));
-  if (Number.isFinite(Number(input.styleInfluence))) sliders.style_weight = Math.max(0, Math.min(1, Number(input.styleInfluence) / 100));
-  const genderTag = input.vocalGender === 'female' ? 'female vocal' : input.vocalGender === 'male' ? 'male vocal' : '';
+  if (Number.isFinite(Number(input.weirdness))) {
+    sliders.weirdness_constraint = Math.max(0, Math.min(1, Number(input.weirdness) / 100));
+  }
+  if (Number.isFinite(Number(input.styleInfluence))) {
+    sliders.style_weight = Math.max(0, Math.min(1, Number(input.styleInfluence) / 100));
+  }
+  const genderTag = input.vocalGender === 'female'
+    ? 'female vocal'
+    : input.vocalGender === 'male'
+      ? 'male vocal'
+      : '';
   const tags = [String(input.stylePrompt || '').trim(), genderTag].filter(Boolean).join(', ');
+
   return {
-    token: null,
+    token: verification.token || null,
+    ...(verification.tokenProvider ? { token_provider: verification.tokenProvider } : {}),
     generation_type: 'TEXT',
     title: String(input.title || '').trim(),
     tags,
@@ -308,7 +622,9 @@ function buildOriginalPayload(input) {
         can_control_sliders: ['weirdness_constraint', 'style_weight'],
         control_sliders: sliders,
       } : {}),
-      ...(input.vocalGender ? { vocal_gender: input.vocalGender === 'female' ? 'f' : 'm' } : {}),
+      ...(input.vocalGender ? {
+        vocal_gender: input.vocalGender === 'female' ? 'f' : 'm',
+      } : {}),
     },
     override_fields: [],
     cover_clip_id: null,
@@ -325,24 +641,30 @@ function buildOriginalPayload(input) {
   };
 }
 
-async function postOriginal(slot, input, headers) {
+async function postOriginal(slot, input, headers, verification = {}) {
   const ses = session.fromPartition(partitionFor(slot));
   const res = await ses.fetch(`${SUNO_API}/api/generate/v2-web/`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(buildOriginalPayload(input)),
+    body: JSON.stringify(buildOriginalPayload(input, verification)),
   });
   const body = await res.json().catch(() => null);
-  const detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail ?? body);
+  const detail = typeof body?.detail === 'string'
+    ? body.detail
+    : JSON.stringify(body?.detail ?? body);
 
   if (!res.ok) {
     if (res.status === 402 || /enough credits|out of credits|out of songs|buy more/i.test(detail || '')) {
       throw new Error('Suno 账号歌曲额度不足');
     }
-    if (res.status === 422 && /verify|verification|captcha/i.test(detail || '')) {
+    if (res.status === 422 && /verify|verification|captcha|人机验证/i.test(detail || '')) {
       return { verificationRequired: true, status: res.status, detail };
     }
     throw new Error(`Suno 原创提交失败（${res.status}）：${detail || '未知错误'}`);
+  }
+
+  if (String(body?.status || '').toLowerCase() === 'error') {
+    throw new Error('Suno 接口拒绝了本次原创提交');
   }
 
   const clips = (body?.clips || []).map(x => x?.id).filter(Boolean).slice(0, 2);
@@ -357,22 +679,24 @@ async function submitOriginal(input) {
   if (!title) throw new Error('请填写歌名');
   if (!lyrics) throw new Error('请填写歌词');
 
-  let headers = await apiHeaders(slot);
-  let verification = await precheckVerification(slot, headers);
+  const headers = await apiHeaders(slot);
+  let verification = {};
+  const precheck = await precheckVerification(slot, headers);
 
-  if (verification.known && verification.required) {
-    await waitForHumanVerification(slot, title);
-    headers = await apiHeaders(slot);
+  if (precheck.known && precheck.required) {
+    verification = await runOfficialVerification(slot, precheck.captchaProvider, title);
   }
 
-  let result = await postOriginal(slot, input, headers);
+  let result = await postOriginal(slot, input, headers, verification);
+
   if (result.verificationRequired) {
-    await waitForHumanVerification(slot, title);
-    headers = await apiHeaders(slot);
-    result = await postOriginal(slot, input, headers);
-    if (result.verificationRequired) {
-      throw new Error('Suno 验证完成后仍要求再次验证，当前任务已停止，避免重复提交。');
-    }
+    const provider = await detectCaptchaProvider(slot, headers);
+    verification = await runOfficialVerification(slot, provider, title);
+    result = await postOriginal(slot, input, headers, verification);
+  }
+
+  if (result.verificationRequired) {
+    throw new Error('Suno 在完成官方验证后仍要求再次验证，已停止当前任务，避免重复提交。');
   }
 
   const clips = result.clips;
@@ -419,7 +743,7 @@ function createMainWindow() {
     height: 820,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Suno 原创 Demo v0.1.1',
+    title: 'Suno Original Studio v0.2.0',
     backgroundColor: '#0b0c10',
     autoHideMenuBar: true,
     webPreferences: {
