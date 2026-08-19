@@ -7,7 +7,7 @@
   <style>
     :root { color-scheme: dark; font-family: Inter, "Microsoft YaHei", sans-serif; }
     body { margin:0; background:#0b0c10; color:#f5f7fb; }
-    .wrap { max-width:1120px; margin:0 auto; padding:24px; }
+    .wrap { max-width:1240px; margin:0 auto; padding:24px; }
     h1 { margin:0 0 6px; font-size:28px; }
     .sub { color:#9aa3b5; margin-bottom:16px; }
     .tabs { display:flex; gap:8px; margin-bottom:18px; }
@@ -30,9 +30,8 @@
     textarea { min-height:270px; resize:vertical; line-height:1.55; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
     .row3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
-    .actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+    .actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; align-items:center; }
     .log { margin-top:18px; background:#0d0f14; border:1px solid #222633; border-radius:10px; padding:12px; min-height:90px; max-height:250px; overflow:auto; white-space:pre-wrap; color:#b7c0d1; font-family:Consolas, monospace; font-size:12px; }
-    .task { margin-top:12px; border:1px solid #2b3040; border-radius:10px; padding:12px; background:#10131a; }
     .track { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-top:1px solid #222633; }
     .track:first-child { border-top:none; }
     .status { color:#aab4c8; font-size:12px; }
@@ -45,15 +44,30 @@
     .file-row { padding:9px 11px; border-top:1px solid #232733; font-size:12px; color:#c8cfda; word-break:break-all; }
     .file-row:first-child { border-top:0; }
     .path-box { margin-top:8px; padding:10px 11px; border-radius:9px; border:1px solid #303544; background:#0f1117; color:#aeb8c8; word-break:break-all; min-height:18px; }
+    .table-wrap { overflow:auto; border:1px solid #292e3b; border-radius:10px; margin-top:14px; }
+    table { width:100%; border-collapse:collapse; min-width:1040px; background:#0f1117; }
+    th, td { padding:10px 9px; border-bottom:1px solid #232733; text-align:left; vertical-align:middle; font-size:12px; }
+    th { color:#9da7b8; background:#131720; position:sticky; top:0; z-index:1; }
+    td.title-cell { min-width:220px; }
+    .badge { display:inline-block; padding:3px 7px; border-radius:999px; background:#252936; color:#b9c2d0; font-size:11px; white-space:nowrap; }
+    .badge.ok { background:#173d31; color:#77e0b5; }
+    .badge.warn { background:#463719; color:#ffd27a; }
+    .badge.err { background:#4a242a; color:#ff9ba6; }
+    .inline-actions { display:flex; gap:6px; flex-wrap:wrap; }
+    .inline-actions button { padding:6px 9px; font-size:11px; }
+    .library-empty { padding:28px; text-align:center; color:#8f98aa; }
+    .library-summary { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+    .check { width:auto; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Suno Original Studio v0.4.0</h1>
-    <div class="sub">原创歌曲 + 3 个独立 Suno 账号 + 官方人机验证衔接 + AVR 1.77.0 原版 N19 完整音频链路。</div>
+    <h1>Suno Original Studio v0.5.0</h1>
+    <div class="sub">原创歌曲 + 持久化歌曲列表 + Suno WAV 下载 + 歌曲列表直接 AVR N19 AI 消痕。</div>
 
     <div class="tabs">
       <button id="tabOriginal" class="tab active">原创歌曲</button>
+      <button id="tabLibrary" class="tab">歌曲列表</button>
       <button id="tabDeai" class="tab">AI 消痕</button>
     </div>
 
@@ -88,14 +102,54 @@
           </div>
           <div class="row">
             <div><label>Weirdness</label><input id="weirdness" type="number" min="0" max="100" value="50" /></div>
-            <div><label>&nbsp;</label><div class="small" style="padding-top:10px">Suno 要求验证时会打开对应账号的官方验证组件；程序负责衔接与验证后的任务续提。</div></div>
+            <div><label>&nbsp;</label><div class="small" style="padding-top:10px">提交成功后，两个 Suno 版本都会自动写入“歌曲列表”。</div></div>
           </div>
           <div class="actions">
             <button id="submitBtn">提交原创</button>
-            <button class="secondary" id="refreshTaskBtn" disabled>刷新任务状态</button>
+            <button class="secondary" id="refreshTaskBtn" disabled>刷新当前任务</button>
           </div>
           <div id="log" class="log">准备就绪。</div>
         </div>
+      </div>
+    </section>
+
+    <section id="libraryView" class="hidden">
+      <div class="card">
+        <div class="library-summary">
+          <div>
+            <h2 style="margin-bottom:6px">歌曲列表</h2>
+            <div class="small">提交后的每个 Suno 版本单独记录。生成完成后可直接勾选并执行 AI 消痕。</div>
+          </div>
+          <div class="small" id="libraryCount">0 首</div>
+        </div>
+        <div class="actions">
+          <button id="libraryRefresh">刷新 Suno 状态</button>
+          <button id="librarySelectAll" class="secondary">全选可处理歌曲</button>
+          <button id="libraryProcessSelected">对选中歌曲 AI 消痕</button>
+          <button id="libraryChooseRoot" class="secondary">选择保存目录</button>
+          <button id="libraryOpenRoot" class="secondary">打开保存目录</button>
+        </div>
+        <label>歌曲保存目录</label>
+        <div id="libraryRoot" class="path-box">正在读取……</div>
+        <div class="small" style="margin-top:8px">处理完成后，每首歌会建立独立目录，保存“歌词.txt”、“Suno原始.wav”和“消痕-N19.wav”。</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><input id="libraryMasterCheck" class="check" type="checkbox" /></th>
+                <th>歌曲</th>
+                <th>账号</th>
+                <th>Suno 状态</th>
+                <th>WAV</th>
+                <th>AI 消痕</th>
+                <th>本地</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="songTableBody"><tr><td colspan="8" class="library-empty">还没有歌曲。</td></tr></tbody>
+          </table>
+        </div>
+        <div id="libraryLog" class="log">歌曲列表准备就绪。</div>
       </div>
     </section>
 
@@ -103,8 +157,8 @@
       <div class="card">
         <h2>AI 消痕 · AVR N19 原版完整链路</h2>
         <div class="hero-note">
-          v0.4.0 已改为 <b>SoX → 节点间响度对齐 → FFmpeg 节点 9（Rubber Band）→ 组合后处理</b> 的 AVR 1.77.0 N19 完整执行路径。程序启动处理前会校验内置 SoX、FFmpeg 以及 SoX 依赖 DLL 的 SHA-256，只有与 AVR 1.77.0 中提取出的工具链完全一致才允许执行。<br>
-          节点参数、阶段采样率/位深、Rubber Band pitch、EQ、Echo、Compressor、Limiter、Metadata 清理和最终 <b>48kHz / PCM16 / Stereo WAV</b> 输出均按原版链路执行。
+          这里继续保留“本地文件手动处理”模式。新提交的 Suno 歌曲更推荐直接到 <b>歌曲列表</b> 勾选处理，程序会先从 Suno 获取 WAV，再自动执行完整 N19 链路，并保存歌词与音频文件。<br>
+          N19 仍使用 <b>SoX → 节点间响度对齐 → FFmpeg 节点 9（Rubber Band）→ 组合后处理</b>。
         </div>
         <div id="deaiEngine" class="small" style="margin-top:12px">正在校验 AVR N19 原版工具链……</div>
 

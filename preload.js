@@ -12,6 +12,19 @@ contextBridge.exposeInMainWorld('demoApi', {
     return () => ipcRenderer.removeListener('verification:state', listener);
   },
 
+  listSongs: () => ipcRenderer.invoke('library:list'),
+  saveSongSubmission: (payload) => ipcRenderer.invoke('library:save-submission', payload),
+  refreshSongLibrary: () => ipcRenderer.invoke('library:refresh'),
+  selectSongRoot: () => ipcRenderer.invoke('library:select-root'),
+  openSongRoot: () => ipcRenderer.invoke('library:open-root'),
+  openSongLocalDir: (clipId) => ipcRenderer.invoke('library:open-song-dir', clipId),
+  processSelectedSongs: (clipIds) => ipcRenderer.invoke('library:process-selected', clipIds),
+  onSongLibraryChanged: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('song-library:changed', listener);
+    return () => ipcRenderer.removeListener('song-library:changed', listener);
+  },
+
   getDeaiEngineInfo: () => ipcRenderer.invoke('deai:engine-info'),
   selectDeaiFiles: () => ipcRenderer.invoke('deai:select-files'),
   selectDeaiOutputDir: () => ipcRenderer.invoke('deai:select-output-dir'),
