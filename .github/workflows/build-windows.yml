@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - fix-login-persistence-v0.5.1
+      - add-negative-style-v0.5.2
     paths:
       - 'bootstrap.js'
       - 'main.js'
@@ -15,9 +15,11 @@ on:
       - 'renderer.js'
       - 'index.html'
       - 'package.json'
+      - 'tools/apply_negative_style_patch.js'
       - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
       - 'THIRD_PARTY_N19.md'
       - 'V0.5_SONG_LIBRARY.md'
+      - 'V0.5.2_NEGATIVE_STYLE.md'
       - 'PROFILE_PERSISTENCE.md'
       - 'BUGFIX_PLAN_v0.5.1.md'
       - 'PROFILE_MIGRATION_NOTES.md'
@@ -40,24 +42,33 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.1_Windows
-          exe=SunoOriginalStudio_v0.5.1.exe
+          artifact=SunoOriginalStudio_v0.5.2_Windows
+          exe=SunoOriginalStudio_v0.5.2.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
           suno_wav_pipeline=true
           stable_session_profile=true
+          negative_style=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build_status/suno_original_studio.txt
-          git commit -m "Start SunoOriginalStudio v0.5.1 build ${{ github.run_id }}" || exit 0
+          git commit -m "Start SunoOriginalStudio v0.5.2 build ${{ github.run_id }}" || exit 0
           git push
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Apply v0.5.2 source patch
+        shell: pwsh
+        run: |
+          node tools/apply_negative_style_patch.js
+          git add main.js renderer.js song_library.js index.html package.json
+          git commit -m "Apply excluded-style parameter to v0.5.2 source" || exit 0
+          git push
 
       - name: Install JavaScript dependencies
         run: npm install
@@ -122,6 +133,7 @@ jobs:
           node --check song_library.js
           node --check preload.js
           node --check renderer.js
+          node --check tools/apply_negative_style_patch.js
 
       - name: Build portable EXE
         run: npm run dist
@@ -132,7 +144,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.1.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.2.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -152,23 +164,22 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.1_Windows
-          path: dist/SunoOriginalStudio_v0.5.1.exe
+          name: SunoOriginalStudio_v0.5.2_Windows
+          path: dist/SunoOriginalStudio_v0.5.2.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.1
-          name: Suno Original Studio v0.5.1
+          tag_name: suno-original-studio-v0.5.2
+          name: Suno Original Studio v0.5.2
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.5.1.exe
+          files: dist/SunoOriginalStudio_v0.5.2.exe
           body: |
-            Fixes Suno login persistence across portable EXE upgrades.
-            Pins userData/sessionData to %APPDATA%/SunoOriginalStudio and migrates legacy persistent partitions plus Chromium Local State before any session is created.
-            Preserves the v0.5 song library, Suno WAV workflow and exact AVR 1.77.0 N19 processing chain.
+            Adds a separate “排除风格” input and sends it to Suno as negative_tags.
+            Keeps stable persistent login sessions, persistent song library, Suno WAV workflow, and exact AVR 1.77.0 N19 processing.
 
       - name: Report successful build
         shell: pwsh
@@ -177,14 +188,15 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.1_Windows
-          exe=SunoOriginalStudio_v0.5.1.exe
+          artifact=SunoOriginalStudio_v0.5.2_Windows
+          exe=SunoOriginalStudio_v0.5.2.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
           suno_wav_pipeline=true
           stable_session_profile=true
+          negative_style=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git add build_status/suno_original_studio.txt
-          git commit -m "Finish SunoOriginalStudio v0.5.1 build ${{ github.run_id }}" || exit 0
+          git commit -m "Finish SunoOriginalStudio v0.5.2 build ${{ github.run_id }}" || exit 0
           git push
