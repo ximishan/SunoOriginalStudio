@@ -49,14 +49,20 @@ SunoOriginalStudio 的目标不是复制 AVR 的授权体系，而是独立实�
 
 ## 二、当前项目状态
 
-当前版本基线：`v0.1.1`
+当前开发版本：`v0.2.0`
 
 当前仓库：`ximishan/SunoOriginalStudio`
+
+当前阶段说明：
+
+- `v0.1.1`：旧验证方式，只检测验证并打开窗口。
+- `v0.2.0`：已经改为 Suno 官方 Challenge → Token → 原任务自动续提架构。
+- `v0.2.0` 的 hCaptcha / Turnstile 代码已经完成，当前进入 Windows EXE 构建与实机验证阶段。
 
 ### 状态说明
 
 - ✅ 已完成：代码已经存在，可以进入实际测试
-- 🟡 部分完成：基础链路已实现，但功能还不完整
+- 🟡 部分完成：基础链路已实现，但功能还不完整，或需要继续做 UI / 调度 / 实机验证
 - ⬜ 未完成：尚未实现
 - 🚫 不做：当前项目明确排除
 
@@ -78,7 +84,7 @@ SunoOriginalStudio 的目标不是复制 AVR 的授权体系，而是独立实�
 | 账号退出登录 | ⬜ | 后续增加 |
 | 删除单个账号登录状态 | ⬜ | 后续增加 |
 | 账号忙碌/空闲状态 | ⬜ | 批量任务时需要 |
-| 账号待验证状态 | 🟡 | 有基础事件状态，但 UI 和调度还需完善 |
+| 账号待验证状态 | 🟡 | main process 已记录 verificationActive，主 UI 还需要做更明显状态 |
 | 自动轮流分配账号 | ⬜ | 批量原创需要 |
 | 单账号并发限制 | ⬜ | 防止同一账号短时间提交过多任务 |
 | 账号失败自动切换 | ⬜ | 后续任务调度功能 |
@@ -118,46 +124,66 @@ SunoOriginalStudio 的目标不是复制 AVR 的授权体系，而是独立实�
 | 功能 | 状态 | 说明 |
 |---|---|---|
 | `/api/c/check` 验证需求检测 | ✅ | 已实现 |
-| 检测 `captcha_version` | 🟡 | 已读取字段，但尚未完整使用 |
+| 检测 `captcha_version` | ✅ | v0.2.0 已实际用于选择 provider |
 | 422 验证错误识别 | ✅ | 提交后遇验证错误可识别 |
 | 打开对应账号 Suno 窗口 | ✅ | 已实现 |
 | 验证窗口自动置顶 | ✅ | 已实现 |
-| 主界面显示“等待验证”状态 | 🟡 | 有事件通知，UI 还需加强 |
-| hCaptcha 官方验证链路 | ⬜ | 下一阶段重点 |
-| Cloudflare Turnstile 官方验证链路 | ⬜ | 下一阶段重点 |
-| 获取官方验证 token | ⬜ | 下一阶段重点 |
-| 将 token 带回原创提交请求 | ⬜ | 下一阶段重点 |
-| 验证完成后自动续提原任务 | 🟡 | 当前通过轮询尝试恢复，但不是完整 AVR 式 token 链路 |
-| 验证失败自动重试 | ⬜ | 后续增加 |
-| 验证超时处理 | 🟡 | 当前已有 3 分钟超时，后续按真实流程完善 |
-| 验证窗口取消 | ⬜ | 后续增加 |
-| 多账号互不影响 | 🟡 | Session 已隔离，但批量调度尚未完成 |
+| 主界面显示“等待验证”状态 | 🟡 | 有事件通知，后续加强账号卡片 UI |
+| hCaptcha 官方验证链路 | ✅ | v0.2.0 已接入 Suno hCaptcha 官方组件，待实机验证 |
+| Cloudflare Turnstile 官方验证链路 | ✅ | v0.2.0 已接入官方 Turnstile Managed Challenge，待实机验证 |
+| 获取官方验证 token | ✅ | challenge callback 返回 token |
+| 将 token 带回原创提交请求 | ✅ | payload 写入 `token` |
+| 传递 token provider | ✅ | provider 1=hCaptcha，2=Turnstile |
+| 验证完成后自动续提原任务 | ✅ | 不需要用户重新点击“提交原创” |
+| 验证失败自动重试 | ✅ | 组件错误最多自动重试 3 次 |
+| 手动重新加载验证 | ✅ | 自动重试耗尽后可手动重载 |
+| 验证超时处理 | ✅ | 当前最长等待 5 分钟 |
+| 验证窗口取消 | ✅ | 验证 UI 中可取消当前任务 |
+| 验证结束恢复主界面 | ✅ | challenge 完成后隐藏验证窗口并聚焦主窗口 |
+| 多账号验证互不影响 | 🟡 | Session 已隔离；批量调度时还需做到“只暂停对应账号” |
 
-说明：
-
-当前 v0.1.1 只是“检测验证 + 打开账号窗口 + 等待验证状态变化”。
-
-目标是升级为：
+当前 v0.2.0 验证流程：
 
 ```text
 提交原创
   ↓
-Suno 返回验证要求
+/api/c/check 预检
+  ↓
+若当前已要求验证
   ↓
 读取 captcha_version
   ↓
-打开当前账号官方验证环境
+provider=1 → Suno hCaptcha
+provider=2 → Cloudflare Turnstile
   ↓
-hCaptcha / Turnstile
+在当前账号自己的 Suno Session /create 页面渲染官方组件
   ↓
-用户完成官方挑战
+用户完成官方挑战（低风险环境可能由官方组件直接通过）
   ↓
 获得官方 token
   ↓
-原任务自动续提
+原创 payload 写入 token + token_provider
+  ↓
+自动提交原任务
 ```
 
-程序不做验证码识别、破解或绕过，只负责把 Suno 官方验证流程正确接起来。
+如果预检没有要求验证，但真正调用 `/api/generate/v2-web/` 后返回 422 verification/captcha：
+
+```text
+422
+ ↓
+重新 /api/c/check 探测 captcha_version
+ ↓
+打开官方 challenge
+ ↓
+获得 token
+ ↓
+自动重发同一首原创任务
+```
+
+程序不做验证码识别、破解、代答或绕过；只负责把用户自己的 Suno Session 与官方验证组件正确接起来。
+
+注意：当前 hCaptcha / Turnstile Site Key 与相关 endpoint 是依据 AVR 1.77.0 中观察到的 Suno Web 配置实现的。Suno 如果未来修改 Web 验证配置，需要同步维护。
 
 ---
 
@@ -329,6 +355,7 @@ persist:suno-account-3
 - Suno Voice 列表获取
 - Suno Voice 创建
 - 多账号之间相互隔离
+- 人机验证期间账号状态标记
 
 对应 preload IPC：
 
@@ -366,12 +393,12 @@ AVR 原创是我们当前最主要的参考模块。
 - AutoPilot
 - 每首作品生成多个版本
 
-模型相关已见：
+模型映射中已见：
 
 ```text
-v5.5
-v5
-v4.5+
+v5.5 → chirp-fenix
+v5   → chirp-crow
+v4.5+ / v4.5-all → chirp-bluejay
 ```
 
 人声：
@@ -387,6 +414,38 @@ female
 smart
 manual
 default
+```
+
+AVR 原创直接调用：
+
+```text
+POST https://studio-api-prod.suno.com/api/generate/v2-web/
+```
+
+核心原创 payload 已确认包含：
+
+```text
+token
+token_provider
+generation_type=TEXT
+title
+tags
+negative_tags
+mv
+prompt
+make_instrumental
+metadata
+persona_id
+transaction_uuid
+```
+
+控制参数位于 metadata 中，例如：
+
+```text
+weirdness_constraint
+style_weight
+vocal_gender
+create_session_token
 ```
 
 批量原创 schema 最大值中出现 20 条作品限制，但实际还会受到 License 限制控制。
@@ -608,24 +667,108 @@ openWorksDirectory
 
 ## 5.9 AVR 人机验证 / Suno 风控
 
-AVR 代码中已确认包含 Suno 风控与验证处理相关逻辑和字符串，包括：
+AVR 代码中已确认存在完整生成验证链路。
 
-- generation 前验证检查
-- 生成接口返回验证要求后的处理
-- Cloudflare Turnstile
-- hCaptcha
-- interactive verification
-- 风控失败
-- 验证超时 / 失败相关分支
-- 验证完成后继续任务
+### 验证预检
 
-我们当前项目计划参考其“工作流思想”，但使用自己的实现：
+```text
+POST /api/c/check
+body: {"ctype":"generation"}
+```
 
-- 当前账号 Session 内完成 Suno 官方验证
-- 不破解验证码
-- 不识别验证码图片
-- 不绕过验证
-- 仅接通官方 Challenge → Token → 原任务继续的流程
+读取：
+
+```text
+required
+captcha_version
+```
+
+provider 映射：
+
+```text
+captcha_version = 1 → hCaptcha → token_provider = 1
+其他 / 2 → Cloudflare Turnstile → token_provider = 2
+```
+
+### 生成接口触发验证
+
+AVR 首次提交时通常：
+
+```text
+token = null
+```
+
+如果 `/api/generate/v2-web/` 返回 HTTP 422，错误包含：
+
+```text
+verify
+verification
+captcha
+人机验证
+```
+
+则重新探测 provider，打开对应官方验证组件。
+
+### Cloudflare Turnstile
+
+已确认 AVR 使用：
+
+```text
+https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit
+```
+
+并渲染可见 Managed Challenge，包含：
+
+- 官方 Turnstile sitekey
+- appearance=always
+- callback(token)
+- error-callback
+- expired-callback
+- timeout-callback
+- unsupported-callback
+- 自动重试
+- 手动重新加载
+- 用户取消
+- 5 分钟最长等待
+
+### hCaptcha
+
+AVR 使用 Suno 自有 hCaptcha endpoint / asset host：
+
+```text
+hcaptcha-endpoint-prod.suno.com
+hcaptcha-assets-prod.suno.com
+hcaptcha-imgs-prod.suno.com
+hcaptcha-reportapi-prod.suno.com
+```
+
+使用 invisible hCaptcha，必要时官方组件会弹出交互挑战。
+
+具备：
+
+- callback(token)
+- error-callback
+- expired-callback
+- chalexpired-callback
+- open-callback
+- close-callback
+- 自动重试
+- 手动重载
+- 取消
+- 5 分钟超时
+
+### Token 回传
+
+拿到 token 后 AVR 重新提交原请求：
+
+```text
+token = challenge 返回值
+token_provider = 1 或 2
+```
+
+歌名、歌词、风格、模型、Voice 等原任务参数保持一致。
+
+我们的 v0.2.0 已按照相同工作流思想独立实现这一链路，但不复用 AVR License / 后端 / 私有业务逻辑。
 
 ---
 
@@ -867,11 +1010,13 @@ AVR 存在服务端下发模型配置结构，例如：
 4. ✅ 风格提示词
 5. ✅ 模型 / 人声 / Weirdness / Style Influence
 6. ✅ 原创提交
-7. 🟡 人机验证完整链路
-8. ⬜ 验证 token 回传
-9. ⬜ 验证后自动续提
+7. ✅ 人机验证完整代码链路
+8. ✅ 验证 token 回传
+9. ✅ 验证后自动续提
 10. ⬜ 自动轮询生成完成
 11. ⬜ 自动下载
+
+当前 P0 的下一件事：**先实机验证 v0.2.0 的 hCaptcha / Turnstile，然后马上做“自动轮询 + 自动下载”。**
 
 ## P1：批量原创
 
@@ -923,7 +1068,25 @@ AVR 存在服务端下发模型配置结构，例如：
 - 增加账号验证窗口置顶
 - 增加验证状态事件通知
 - 增加验证后自动恢复尝试
-- 当前验证仍不是完整 hCaptcha / Turnstile token 链路
+- 验证仍不是完整 hCaptcha / Turnstile token 链路
+
+## v0.2.0
+
+- 重做人机验证流程，不再依赖“轮询 required 变 false”
+- `/api/c/check` 的 `captcha_version` 正式参与 provider 选择
+- 接入 Suno 官方 hCaptcha 链路
+- 接入 Cloudflare Turnstile Managed Challenge 链路
+- 官方 challenge 返回 token 后自动写入原创请求
+- 写入 `token_provider`
+- 422 验证错误可触发 challenge 并自动重发原任务
+- 验证失败自动重试 3 次
+- 支持手动重新加载验证
+- 支持取消当前验证任务
+- 验证最长等待调整为 5 分钟
+- challenge 完成后自动隐藏验证窗口并返回主程序
+- 增加 `verificationActive` 账号内部状态
+- 新增 Windows GitHub Actions 构建流程
+- 当前状态：代码完成，等待 Windows EXE 实机验证
 
 ---
 
@@ -938,3 +1101,4 @@ AVR 存在服务端下发模型配置结构，例如：
 5. 每次发布新版本，在“版本记录”中增加一节
 6. 不把 AVR License、授权、公告、反馈重新引入本项目
 7. 重点保证“原创 + 多账号 + 人机验证 + 批量 + 下载”主线稳定
+8. 对依赖 Suno Web 私有接口或前端配置的部分，必须标注“需要随 Suno 变化维护”
