@@ -26,6 +26,7 @@
       "preload.js",
       "index.html",
       "renderer.js",
+      "account_slots_fix.js",
       "package.json"
     ],
     "extraResources": [
