@@ -1,4 +1,4 @@
-status=started
+status=success
 run_id=32231346357
 artifact=SunoOriginalStudio_v0.5.0_Windows
 exe=SunoOriginalStudio_v0.5.0.exe
