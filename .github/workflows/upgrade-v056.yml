@@ -1,0 +1,66 @@
+name: Upgrade SunoOriginalStudio v0.5.6
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'suno_session.js'
+      - 'tools/apply_v056_automation_patch.py'
+      - 'tools/v056_patch_parts/**'
+      - 'V0.5.6_AUTOMATION_PIPELINE.md'
+      - '.github/workflows/upgrade-v056.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: suno-original-studio-v056-upgrade
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply v0.5.6 source upgrade
+        run: python tools/apply_v056_automation_patch.py
+
+      - name: Syntax check upgraded sources
+        run: |
+          node --check bootstrap.js
+          node --check main.js
+          node --check suno_session.js
+          node --check deai.js
+          node --check song_library.js
+          node --check preload.js
+          node --check renderer.js
+          python -m py_compile tools/apply_v056_automation_patch.py
+
+      - name: Commit canonical v0.5.6 source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bootstrap.js main.js suno_session.js song_library.js preload.js renderer.js index.html package.json README.md PROJECT_STATUS_AND_AVR_FEATURES.md V0.5.6_AUTOMATION_PIPELINE.md .github/workflows/build-windows.yml
+          if git diff --cached --quiet; then
+            echo "v0.5.6 source is already current."
+          else
+            git commit -m "Implement v0.5.6 unified auth and automation"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
