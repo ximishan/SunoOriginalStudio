@@ -1,0 +1,49 @@
+生成完成后自动保存歌词 + WAV | ✅ |'),
+    ('| 下载完成后自动进入 N19 | ⬜ |', '| 下载完成后自动进入 N19 | ✅ |'),
+    ('| 自动化链路开关 | ⬜ |', '| 自动化链路开关 | ✅ |'),
+    ('| 自动后台刷新 | ⬜ |', '| 自动后台刷新 | ✅ |'),
+    ('| 生成完成自动下载 | ⬜ |', '| 生成完成自动下载 | ✅ |'),
+    ('| 自动保存歌词/音频 | ⬜ |', '| 自动保存歌词/音频 | ✅ |'),
+    ('| 生成完成自动 N19 | ⬜ |', '| 生成完成自动 N19 | ✅ |'),
+    ('| 后台自动轮询 | ⬜ |', '| 后台自动轮询 | ✅ |'),
+]:
+    new = new.replace(old, done)
+new = new.replace('### P0-1：Suno token 获取逻辑没有统一', '### ✅ P0-1：Suno token 获取逻辑已统一（v0.5.6）')
+new = new.replace('### P0-2：歌曲状态依赖手动刷新', '### ✅ P0-2：歌曲状态已支持后台自动刷新（v0.5.6）')
+new = new.replace('### P0-3：下载和 N19 仍是手动触发', '### ✅ P0-3：下载和 N19 已支持后台自动触发（v0.5.6）')
+new = new.replace('## v0.5.5 — 统一账号 Session / Auth Token（下一步，P0）', '## ✅ v0.5.5 — 统一账号 Session / Auth Token（已并入 v0.5.6）')
+new = new.replace('## v0.5.6 — 自动轮询 + 自动下载 + 可选自动 N19（P0）', '## ✅ v0.5.6 — 自动轮询 + 自动下载 + 可选自动 N19（已完成）')
+if '\n## v0.5.6\n' not in new:
+    release = '''
+
+## v0.5.6
+
+- 新增共享 `suno_session.js`，原创、状态查询、歌曲列表与 WAV 请求统一使用 Clerk Session token
+- 移除歌曲列表对短生命周期 `__session` 的硬性前置依赖
+- 后台自动轮询未完成歌曲，程序启动后自动恢复
+- 新增“自动下载 WAV + 保存歌词”开关
+- 新增“自动 AVR N19”开关；开启 N19 会自动开启 WAV 下载
+- 自动下载/自动 N19 使用文件存在 + 状态双重幂等判断，避免重启后重复处理
+- 自动处理失败使用指数退避，避免高频请求 Suno 接口
+'''
+    new = new.replace('\n---\n\n# 九、维护规则', release + '\n---\n\n# 九、维护规则', 1)
+if new != text:
+    write('PROJECT_STATUS_AND_AVR_FEATURES.md', new)
+
+print('v0.5.6 automation patch complete. changed=' + (','.join(sorted(changed)) if changed else 'none'))
+
+# Keep the normal Windows build workflow on the new baseline for all future source changes.
+workflow_file = '.github/workflows/build-windows.yml'
+workflow = read(workflow_file)
+workflow_new = workflow.replace('v0.5.4', 'v0.5.6')
+workflow_new = workflow_new.replace("      - 'main.js'\n", "      - 'main.js'\n      - 'suno_session.js'\n", 1) if "      - 'suno_session.js'\n" not in workflow_new else workflow_new
+workflow_new = workflow_new.replace("      - 'V0.5.4_SONG_PLAYER.md'\n", "      - 'V0.5.4_SONG_PLAYER.md'\n      - 'V0.5.6_AUTOMATION_PIPELINE.md'\n", 1) if "      - 'V0.5.6_AUTOMATION_PIPELINE.md'\n" not in workflow_new else workflow_new
+# Historical source-patch steps are no longer appropriate once the canonical source is v0.5.6.
+workflow_new = re.sub(
+    r"\n      - name: Apply v0\.5\.3 source patch[\s\S]*?\n      - name: Install JavaScript dependencies",
+    "\n      - name: Install JavaScript dependencies",
+    workflow_new,
+    count=1,
+)
+if 'node --check suno_session.js' not in workflow_new:
+    workflow_new = workflow_
