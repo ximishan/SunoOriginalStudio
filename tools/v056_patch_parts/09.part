@@ -1,0 +1,16 @@
+new.replace('          node --check main.js\n', '          node --check main.js\n          node --check suno_session.js\n', 1)
+workflow_new = workflow_new.replace(
+    '            Adds an integrated music player to the song list with play/pause, stop, seek, time display and volume control.\n            Playback prefers the local N19 WAV, then the local Suno original WAV, then the Suno online audio/CDN source.\n            Keeps persistent login sessions, negative style, no-repeat AI cleaning, Suno WAV workflow, and exact AVR 1.77.0 N19 processing.',
+    '            Unifies Suno Clerk Session/Auth across original generation, status refresh and WAV download.\n            Adds main-process background polling, optional automatic Suno WAV + lyrics saving, and optional automatic exact AVR N19 processing.\n            Keeps persistent 3-account sessions, negative style, no-repeat AI cleaning, song-list playback, and exact AVR 1.77.0 N19 processing.'
+)
+for marker in ['          unified_suno_auth=true\n', '          background_polling=true\n', '          auto_wav_download=true\n', '          auto_n19=true\n']:
+    if marker not in workflow_new:
+        workflow_new = workflow_new.replace('          stable_session_profile=true\n', '          stable_session_profile=true\n' + marker, 1)
+        # Add to success status block as well, if a second occurrence remains without marker nearby.
+        pos = workflow_new.rfind('          stable_session_profile=true\n')
+        if pos >= 0 and marker.strip() not in workflow_new[pos:pos+300]:
+            workflow_new = workflow_new[:pos] + workflow_new[pos:].replace('          stable_session_profile=true\n', '          stable_session_profile=true\n' + marker, 1)
+if workflow_new != workflow:
+    write(workflow_file, workflow_new)
+
+print('normal build workflow upgraded to v0.5.6')
