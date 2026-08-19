@@ -7,6 +7,11 @@ contextBridge.exposeInMainWorld('demoApi', {
   submitOriginal: (payload) => ipcRenderer.invoke('original:submit', payload),
   refreshTask: (task) => ipcRenderer.invoke('task:refresh', task),
   openSong: (url) => ipcRenderer.invoke('song:open', url),
+  onAccountStateChanged: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('account:state-changed', listener);
+    return () => ipcRenderer.removeListener('account:state-changed', listener);
+  },
   onVerificationState: (handler) => {
     const listener = (_event, payload) => handler(payload);
     ipcRenderer.on('verification:state', listener);
@@ -14,6 +19,9 @@ contextBridge.exposeInMainWorld('demoApi', {
   },
 
   listSongs: () => ipcRenderer.invoke('library:list'),
+  getSongAutomation: () => ipcRenderer.invoke('library:get-automation'),
+  setSongAutomation: (patch) => ipcRenderer.invoke('library:set-automation', patch),
+  runSongAutomationNow: () => ipcRenderer.invoke('library:run-automation-now'),
   saveSongSubmission: (payload) => ipcRenderer.invoke('library:save-submission', payload),
   refreshSongLibrary: () => ipcRenderer.invoke('library:refresh'),
   selectSongRoot: () => ipcRenderer.invoke('library:select-root'),

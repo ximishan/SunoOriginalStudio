@@ -3,14 +3,20 @@ const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
-const { BrowserWindow, session } = require('electron');
+const { BrowserWindow } = require('electron');
+const { sessionFor, apiHeaders } = require('./suno_session');
 
-const SUNO_HOME = 'https://suno.com/';
-const SUNO_STUDIO = 'https://suno.com/studio';
 const SUNO_API = 'https://studio-api-prod.suno.com';
 const WAV_TIMEOUT_MS = 150000;
+const DEFAULT_POLL_INTERVAL_MS = 5000;
 
 let activeProcess = null;
+let automationTimer = null;
+let automationApp = null;
+let automationRunning = false;
+let automationLastRunAt = '';
+let automationLastError = '';
+const automationRetry = new Map();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -50,10 +56,6 @@ const BETWEEN_NORM_AF = 'loudnorm=I=-15:TP=-1.5:LRA=11';
 const SCHEME9_AF = 'rubberband=pitch=0.975,equalizer=f=80:g=4.0:width_type=h:width=80,equalizer=f=150:g=3.0:width_type=h:width=100,equalizer=f=300:g=-1.5:width_type=h:width=200,equalizer=f=1500:g=-1.0:width_type=h:width=400,equalizer=f=4000:g=3.5:width_type=h:width=2000,equalizer=f=8000:g=1.8:width_type=h:width=4000,aecho=0.55:0.4:35|45:0.12|0.08,volume=2.0,highpass=f=45,acompressor=threshold=-18dB:ratio=2.0:attack=10:release=120:makeup=1.5,volume=2.0dB,alimiter=limit=0.97';
 const POSTPROCESS_AF = 'highpass=f=28,equalizer=f=120:g=0.25:width_type=h:width=100,equalizer=f=1800:g=0.20:width_type=h:width=1200,equalizer=f=7200:g=-0.18:width_type=h:width=3800,acompressor=threshold=-19dB:ratio=1.18:attack=24:release=210:makeup=1,alimiter=limit=0.96';
 
-function partitionFor(slot) {
-  return `persist:suno-original-demo-${slot}`;
-}
-
 function libraryFile(app) {
   return path.join(app.getPath('userData'), 'song-library-v1.json');
 }
@@ -62,17 +64,27 @@ function defaultRoot(app) {
   return path.join(app.getPath('documents'), 'SunoOriginalStudio作品');
 }
 
+function normalizeAutomation(value = {}) {
+  const pollIntervalMs = Number(value.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS);
+  return {
+    autoDownload: Boolean(value.autoDownload),
+    autoN19: Boolean(value.autoN19),
+    pollIntervalMs: Math.max(3000, Math.min(60000, Number.isFinite(pollIntervalMs) ? pollIntervalMs : DEFAULT_POLL_INTERVAL_MS)),
+  };
+}
+
 function readState(app) {
   const file = libraryFile(app);
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     return {
-      version: 1,
+      version: 2,
       rootDir: parsed.rootDir || defaultRoot(app),
+      automation: normalizeAutomation(parsed.automation),
       songs: Array.isArray(parsed.songs) ? parsed.songs : [],
     };
   } catch {
-    return { version: 1, rootDir: defaultRoot(app), songs: [] };
+    return { version: 2, rootDir: defaultRoot(app), automation: normalizeAutomation(), songs: [] };
   }
 }
 
@@ -85,9 +97,21 @@ function writeState(app, state) {
 }
 
 function emit(sender, payload) {
+  let delivered = false;
   try {
-    if (sender && !sender.isDestroyed()) sender.send('song-library:changed', payload);
+    if (sender && !sender.isDestroyed()) {
+      sender.send('song-library:changed', payload);
+      delivered = true;
+    }
   } catch {}
+  if (delivered) return;
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (!win.isDestroyed() && win.webContents.getURL().startsWith('file://')) {
+        win.webContents.send('song-library:changed', payload);
+      }
+    } catch {}
+  }
 }
 
 function safeName(value, fallback = '未命名') {
@@ -139,64 +163,10 @@ function saveSubmission(app, payload = {}) {
   return state;
 }
 
-async function hiddenAuthToken(slot) {
-  const partition = partitionFor(slot);
-  const ses = session.fromPartition(partition);
-  const cookies = await ses.cookies.get({ url: SUNO_HOME });
-  if (!cookies.some(c => c.name === '__session' || c.name.startsWith('__session_'))) {
-    throw new Error(`账号 ${slot} 未登录`);
-  }
-
-  const win = new BrowserWindow({
-    show: false,
-    webPreferences: {
-      partition,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  });
-  try {
-    await win.loadURL(SUNO_STUDIO);
-    const token = await win.webContents.executeJavaScript(`(async () => {
-      for (let i = 0; i < 30; i++) {
-        if (window.Clerk?.session) break;
-        await new Promise(r => setTimeout(r, 400));
-      }
-      try {
-        const t = await window.Clerk?.session?.getToken?.();
-        if (t) return t;
-      } catch {}
-      const cookie = Object.fromEntries(document.cookie.split(';').map(part => {
-        const [key, ...rest] = part.trim().split('=');
-        return [key, rest.join('=')];
-      }));
-      return cookie.__session || Object.entries(cookie).find(([k]) => k.startsWith('__session'))?.[1] || '';
-    })()`);
-    if (!String(token || '').trim()) throw new Error(`账号 ${slot} 无法读取 Suno 登录令牌`);
-    return String(token).trim();
-  } finally {
-    try { win.destroy(); } catch {}
-  }
-}
-
-async function apiHeaders(slot) {
-  const token = await hiddenAuthToken(slot);
-  const ses = session.fromPartition(partitionFor(slot));
-  const cookies = await ses.cookies.get({ url: SUNO_HOME });
-  const device = cookies.find(c => c.name === 'suno_device_id')?.value || '';
-  return {
-    Authorization: `Bearer ${token}`,
-    'Browser-Token': JSON.stringify({ token: Buffer.from(JSON.stringify({ timestamp: Date.now() }), 'utf8').toString('base64') }),
-    ...(device ? { 'Device-Id': device } : {}),
-  };
-}
-
 async function refreshSlotSongs(slot, songs) {
   if (!songs.length) return;
-  const headers = await apiHeaders(slot);
-  const ses = session.fromPartition(partitionFor(slot));
+  const headers = await apiHeaders(slot, { json: false });
+  const ses = sessionFor(slot);
   const ids = songs.map(x => x.clipId);
   const res = await ses.fetch(`${SUNO_API}/api/feed/v2?ids=${encodeURIComponent(ids.join(','))}`, { headers });
   const body = await res.json().catch(() => null);
@@ -211,7 +181,7 @@ async function refreshSlotSongs(slot, songs) {
     song.title = x.title || song.title;
     song.audioUrl = x.audio_url || song.audioUrl || '';
     song.duration = Number(x.metadata?.duration || song.duration || 0);
-    song.lastError = x.error_message || x.metadata?.error_message || song.lastError || '';
+    song.lastError = x.error_message || x.metadata?.error_message || '';
     song.updatedAt = now;
   }
 }
@@ -310,15 +280,14 @@ async function processExactN19(app, sourceWav, outputWav, sender, song) {
 }
 
 async function requestWavUrl(slot, clipId, sender) {
-  const headers = await apiHeaders(slot);
-  const ses = session.fromPartition(partitionFor(slot));
+  const headers = await apiHeaders(slot, { json: false });
+  const ses = sessionFor(slot);
   emit(sender, { type: 'progress', clipId, message: '正在向 Suno 请求 WAV 导出…' });
   const convert = await ses.fetch(`${SUNO_API}/api/gen/${clipId}/convert_wav/`, { method: 'POST', headers });
   if (!convert.ok && convert.status !== 409) {
     const detail = await convert.text().catch(() => '');
     throw new Error(`Suno WAV 导出请求失败（${convert.status}）：${detail || '当前账号可能没有 WAV 导出权限'}`);
   }
-
   const deadline = Date.now() + WAV_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const res = await ses.fetch(`${SUNO_API}/api/gen/${clipId}/wav_file/`, { headers });
@@ -334,7 +303,7 @@ async function requestWavUrl(slot, clipId, sender) {
 }
 
 async function downloadToFile(slot, url, filePath) {
-  const ses = session.fromPartition(partitionFor(slot));
+  const ses = sessionFor(slot);
   const res = await ses.fetch(url);
   if (!res.ok) throw new Error(`下载 Suno WAV 失败（${res.status}）`);
   const buffer = Buffer.from(await res.arrayBuffer());
@@ -359,6 +328,81 @@ function updateSong(app, clipId, patch, sender) {
   return song;
 }
 
+function fileReady(file) {
+  try { return Boolean(file && fs.existsSync(file) && fs.statSync(file).size > 0); } catch { return false; }
+}
+
+function pathsForSong(app, song) {
+  const state = readState(app);
+  const rootDir = state.rootDir || defaultRoot(app);
+  const dir = song.localDir || songDir(rootDir, song);
+  return {
+    rootDir,
+    dir,
+    lyricsPath: song.lyricsPath || path.join(dir, '歌词.txt'),
+    sourceWavPath: song.sourceWavPath || path.join(dir, `${safeName(song.title)}-Suno原始.wav`),
+    processedWavPath: song.processedWavPath || path.join(dir, `${safeName(song.title)}-消痕-N19.wav`),
+  };
+}
+
+async function ensureSongDownloaded(app, song, sender) {
+  const paths = pathsForSong(app, song);
+  fs.mkdirSync(paths.dir, { recursive: true });
+  if (!fileReady(paths.lyricsPath)) fs.writeFileSync(paths.lyricsPath, String(song.lyrics || ''), 'utf8');
+  if (fileReady(paths.sourceWavPath)) {
+    return updateSong(app, song.clipId, {
+      localDir: paths.dir,
+      lyricsPath: paths.lyricsPath,
+      sourceWavPath: paths.sourceWavPath,
+      wavStatus: 'downloaded',
+      localStatus: 'saved',
+      lastError: '',
+    }, sender) || song;
+  }
+  updateSong(app, song.clipId, {
+    localDir: paths.dir,
+    lyricsPath: paths.lyricsPath,
+    wavStatus: 'downloading',
+    localStatus: 'saving',
+    lastError: '',
+  }, sender);
+  const wavUrl = await requestWavUrl(song.slot, song.clipId, sender);
+  await downloadToFile(song.slot, wavUrl, paths.sourceWavPath);
+  return updateSong(app, song.clipId, {
+    wavUrl,
+    localDir: paths.dir,
+    lyricsPath: paths.lyricsPath,
+    sourceWavPath: paths.sourceWavPath,
+    wavStatus: 'downloaded',
+    localStatus: 'saved',
+    lastError: '',
+  }, sender) || song;
+}
+
+async function ensureSongN19(app, song, sender) {
+  song = readState(app).songs.find(x => x.clipId === song.clipId) || song;
+  if (String(song.deaiStatus || '').toLowerCase() === 'complete' && fileReady(song.processedWavPath)) return song;
+  if (String(song.deaiStatus || '').toLowerCase() === 'processing') return song;
+  song = await ensureSongDownloaded(app, song, sender);
+  const paths = pathsForSong(app, song);
+  if (fileReady(paths.processedWavPath)) {
+    return updateSong(app, song.clipId, {
+      processedWavPath: paths.processedWavPath,
+      deaiStatus: 'complete',
+      localStatus: 'saved',
+      lastError: '',
+    }, sender) || song;
+  }
+  updateSong(app, song.clipId, { deaiStatus: 'processing', localStatus: 'saving', lastError: '' }, sender);
+  await processExactN19(app, paths.sourceWavPath, paths.processedWavPath, sender, song);
+  return updateSong(app, song.clipId, {
+    processedWavPath: paths.processedWavPath,
+    deaiStatus: 'complete',
+    localStatus: 'saved',
+    lastError: '',
+  }, sender) || song;
+}
+
 async function processSelectedSongs(app, clipIds, sender) {
   let state = await refreshLibrary(app);
   const selected = state.songs.filter(x => clipIds.includes(x.clipId));
@@ -373,62 +417,20 @@ async function processSelectedSongs(app, clipIds, sender) {
       if (!/^(complete|completed)$/i.test(String(song.generationStatus || ''))) {
         throw new Error(`歌曲尚未生成完成：${song.generationStatus || 'submitted'}`);
       }
-
-      // v0.5.3 safety guard: a completed N19 result is authoritative.
-      // Even if the renderer sends this clipId again, never download/process it twice.
-      if (String(song.deaiStatus || '').toLowerCase() === 'complete') {
+      if (String(song.deaiStatus || '').toLowerCase() === 'complete' && fileReady(song.processedWavPath)) {
         emit(sender, { type: 'progress', clipId: song.clipId, message: '这首歌已经完成 AI 消痕，已自动跳过，不会重复处理。' });
-        results.push({
-          clipId: song.clipId,
-          ok: true,
-          skipped: true,
-          reason: 'already_processed',
-          localDir: song.localDir || '',
-          sourceWavPath: song.sourceWavPath || '',
-          processedWavPath: song.processedWavPath || '',
-          lyricsPath: song.lyricsPath || '',
-        });
+        results.push({ clipId: song.clipId, ok: true, skipped: true, reason: 'already_processed', localDir: song.localDir || '', sourceWavPath: song.sourceWavPath || '', processedWavPath: song.processedWavPath || '', lyricsPath: song.lyricsPath || '' });
         continue;
       }
-
-      const dir = songDir(rootDir, song);
-      fs.mkdirSync(dir, { recursive: true });
-      const lyricsPath = path.join(dir, '歌词.txt');
-      const sourceWavPath = path.join(dir, `${safeName(song.title)}-Suno原始.wav`);
-      const processedWavPath = path.join(dir, `${safeName(song.title)}-消痕-N19.wav`);
-      fs.writeFileSync(lyricsPath, String(song.lyrics || ''), 'utf8');
-      song = updateSong(app, song.clipId, {
-        localDir: dir,
-        lyricsPath,
-        localStatus: 'saving',
-        wavStatus: 'downloading',
-        deaiStatus: 'waiting',
-        lastError: '',
-      }, sender) || song;
-
-      const wavUrl = await requestWavUrl(song.slot, song.clipId, sender);
-      await downloadToFile(song.slot, wavUrl, sourceWavPath);
-      song = updateSong(app, song.clipId, {
-        wavUrl,
-        sourceWavPath,
-        wavStatus: 'downloaded',
-        deaiStatus: 'processing',
-      }, sender) || song;
-
-      await processExactN19(app, sourceWavPath, processedWavPath, sender, song);
-      updateSong(app, song.clipId, {
-        processedWavPath,
-        deaiStatus: 'complete',
-        localStatus: 'saved',
-        lastError: '',
-      }, sender);
-      results.push({ clipId: song.clipId, ok: true, localDir: dir, sourceWavPath, processedWavPath, lyricsPath });
+      song = await ensureSongN19(app, song, sender);
+      results.push({ clipId: song.clipId, ok: true, localDir: song.localDir, sourceWavPath: song.sourceWavPath, processedWavPath: song.processedWavPath, lyricsPath: song.lyricsPath });
     } catch (e) {
       const error = String(e?.message || e);
+      const latest = readState(app).songs.find(x => x.clipId === song.clipId) || song;
       updateSong(app, song.clipId, {
-        deaiStatus: 'error',
+        deaiStatus: latest.deaiStatus === 'complete' ? 'complete' : 'error',
         localStatus: 'error',
-        wavStatus: song.wavStatus === 'downloaded' ? 'downloaded' : 'error',
+        wavStatus: latest.wavStatus === 'downloaded' ? 'downloaded' : 'error',
         lastError: error,
       }, sender);
       results.push({ clipId: song.clipId, ok: false, error });
@@ -444,59 +446,168 @@ async function processSelectedSongs(app, clipIds, sender) {
   };
 }
 
+function isComplete(song) {
+  return /^(complete|completed)$/i.test(String(song.generationStatus || ''));
+}
+
+function isTerminalGenerationError(song) {
+  return /^(error|failed)$/i.test(String(song.generationStatus || ''));
+}
+
+async function refreshPendingLibrary(app) {
+  const state = readState(app);
+  const groups = new Map();
+  for (const song of state.songs) {
+    if (isComplete(song) || isTerminalGenerationError(song)) continue;
+    if (!groups.has(song.slot)) groups.set(song.slot, []);
+    groups.get(song.slot).push(song);
+  }
+  for (const [slot, songs] of groups.entries()) {
+    try {
+      await refreshSlotSongs(slot, songs);
+    } catch (e) {
+      const error = String(e?.message || e);
+      for (const song of songs) song.lastError = error;
+    }
+  }
+  writeState(app, state);
+  emit(null, { type: 'library-refreshed', automation: state.automation });
+  return state;
+}
+
+function retryReady(clipId) {
+  const state = automationRetry.get(clipId);
+  return !state || Date.now() >= state.nextAt;
+}
+
+function markAutomationFailure(clipId, error) {
+  const current = automationRetry.get(clipId) || { failures: 0, nextAt: 0 };
+  current.failures += 1;
+  const delay = Math.min(120000, 5000 * (2 ** Math.min(current.failures - 1, 5)));
+  current.nextAt = Date.now() + delay;
+  current.error = error;
+  automationRetry.set(clipId, current);
+}
+
+function clearAutomationFailure(clipId) {
+  automationRetry.delete(clipId);
+}
+
+function automationSnapshot(app) {
+  const state = readState(app);
+  return {
+    ...state.automation,
+    running: Boolean(automationTimer),
+    working: automationRunning,
+    lastRunAt: automationLastRunAt,
+    lastError: automationLastError,
+  };
+}
+
+async function runAutomationTick(app) {
+  if (automationRunning) return automationSnapshot(app);
+  automationRunning = true;
+  automationLastError = '';
+  try {
+    const state = await refreshPendingLibrary(app);
+    const settings = normalizeAutomation(state.automation);
+    if (settings.autoDownload || settings.autoN19) {
+      const candidate = state.songs.find(song => {
+        if (!isComplete(song) || !retryReady(song.clipId)) return false;
+        const needsDownload = !fileReady(song.sourceWavPath) || song.wavStatus !== 'downloaded';
+        const needsN19 = settings.autoN19 && (song.deaiStatus !== 'complete' || !fileReady(song.processedWavPath));
+        return (settings.autoDownload && needsDownload) || needsN19;
+      });
+      if (candidate) {
+        try {
+          emit(null, { type: 'progress', clipId: candidate.clipId, message: settings.autoN19 ? '后台自动处理：下载 WAV 并执行 N19…' : '后台自动处理：下载 Suno WAV…' });
+          if (settings.autoN19) await ensureSongN19(app, candidate, null);
+          else await ensureSongDownloaded(app, candidate, null);
+          clearAutomationFailure(candidate.clipId);
+        } catch (e) {
+          const error = String(e?.message || e);
+          markAutomationFailure(candidate.clipId, error);
+          const latest = readState(app).songs.find(x => x.clipId === candidate.clipId) || candidate;
+          updateSong(app, candidate.clipId, {
+            wavStatus: latest.wavStatus === 'downloaded' ? 'downloaded' : 'error',
+            deaiStatus: settings.autoN19 && latest.deaiStatus !== 'complete' ? 'error' : latest.deaiStatus,
+            localStatus: 'error',
+            lastError: error,
+          }, null);
+          automationLastError = error;
+        }
+      }
+    }
+    automationLastRunAt = new Date().toISOString();
+  } catch (e) {
+    automationLastError = String(e?.message || e);
+  } finally {
+    automationRunning = false;
+    if (automationApp) emit(null, { type: 'automation-state', automation: automationSnapshot(automationApp) });
+  }
+  return automationSnapshot(app);
+}
+
+function restartAutomationTimer(app) {
+  if (automationTimer) clearInterval(automationTimer);
+  const interval = normalizeAutomation(readState(app).automation).pollIntervalMs;
+  automationTimer = setInterval(() => runAutomationTick(app).catch(() => {}), interval);
+  if (typeof automationTimer.unref === 'function') automationTimer.unref();
+}
+
+function startSongLibraryAutomation(app) {
+  automationApp = app;
+  restartAutomationTimer(app);
+  setTimeout(() => runAutomationTick(app).catch(() => {}), 1200);
+}
+
+function stopSongLibraryAutomation() {
+  if (automationTimer) clearInterval(automationTimer);
+  automationTimer = null;
+  automationApp = null;
+}
+
+function setAutomationSettings(app, patch = {}) {
+  const state = readState(app);
+  const next = normalizeAutomation({ ...state.automation, ...patch });
+  if (next.autoN19) next.autoDownload = true;
+  state.automation = next;
+  writeState(app, state);
+  if (automationApp) {
+    restartAutomationTimer(app);
+    setTimeout(() => runAutomationTick(app).catch(() => {}), 50);
+  }
+  emit(null, { type: 'automation-state', automation: automationSnapshot(app) });
+  return automationSnapshot(app);
+}
+
 function getSongPlaySource(app, clipId) {
   const state = readState(app);
   const song = state.songs.find(x => x.clipId === clipId);
   if (!song) throw new Error('歌曲列表中没有找到这首歌');
-
   const localCandidates = [
     { file: song.processedWavPath, kind: 'n19', label: 'AI消痕版 WAV' },
     { file: song.sourceWavPath, kind: 'suno-wav', label: 'Suno 原始 WAV' },
   ];
   for (const candidate of localCandidates) {
-    if (candidate.file && fs.existsSync(candidate.file)) {
-      try {
-        if (fs.statSync(candidate.file).size > 0) {
-          return {
-            clipId: song.clipId,
-            title: song.title || '未命名',
-            url: pathToFileURL(candidate.file).href,
-            kind: candidate.kind,
-            label: candidate.label,
-            local: true,
-          };
-        }
-      } catch {}
+    if (fileReady(candidate.file)) {
+      return { clipId: song.clipId, title: song.title || '未命名', url: pathToFileURL(candidate.file).href, kind: candidate.kind, label: candidate.label, local: true };
     }
   }
-
   if (song.audioUrl) {
-    return {
-      clipId: song.clipId,
-      title: song.title || '未命名',
-      url: song.audioUrl,
-      kind: 'suno-stream',
-      label: 'Suno 在线音频',
-      local: false,
-    };
+    return { clipId: song.clipId, title: song.title || '未命名', url: song.audioUrl, kind: 'suno-stream', label: 'Suno 在线音频', local: false };
   }
-
-  if (/^(complete|completed)$/i.test(String(song.generationStatus || '')) && song.clipId) {
-    return {
-      clipId: song.clipId,
-      title: song.title || '未命名',
-      url: `https://cdn1.suno.ai/${encodeURIComponent(song.clipId)}.mp3`,
-      kind: 'suno-cdn',
-      label: 'Suno 在线音频',
-      local: false,
-    };
+  if (isComplete(song) && song.clipId) {
+    return { clipId: song.clipId, title: song.title || '未命名', url: `https://cdn1.suno.ai/${encodeURIComponent(song.clipId)}.mp3`, kind: 'suno-cdn', label: 'Suno 在线音频', local: false };
   }
-
-  throw new Error('这首歌还没有可试听的音频，请先刷新 Suno 状态');
+  throw new Error('这首歌还没有可试听的音频，请等待后台刷新或手动刷新 Suno 状态');
 }
 
 function registerSongLibraryIpc({ app, ipcMain, dialog, shell }) {
   ipcMain.handle('library:list', async () => readState(app));
+  ipcMain.handle('library:get-automation', async () => automationSnapshot(app));
+  ipcMain.handle('library:set-automation', async (_event, patch) => setAutomationSettings(app, patch || {}));
+  ipcMain.handle('library:run-automation-now', async () => runAutomationTick(app));
   ipcMain.handle('library:save-submission', async (_event, payload) => saveSubmission(app, payload || {}));
   ipcMain.handle('library:refresh', async () => refreshLibrary(app));
   ipcMain.handle('library:select-root', async () => {
@@ -523,9 +634,7 @@ function registerSongLibraryIpc({ app, ipcMain, dialog, shell }) {
     if (error) throw new Error(error);
     return true;
   });
-  ipcMain.handle('library:process-selected', async (event, clipIds) => {
-    return processSelectedSongs(app, Array.isArray(clipIds) ? clipIds : [], event.sender);
-  });
+  ipcMain.handle('library:process-selected', async (event, clipIds) => processSelectedSongs(app, Array.isArray(clipIds) ? clipIds : [], event.sender));
 }
 
-module.exports = { registerSongLibraryIpc };
+module.exports = { registerSongLibraryIpc, startSongLibraryAutomation, stopSongLibraryAutomation };

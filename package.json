@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.4",
-  "description": "Suno original-song desktop tool with excluded-style negative tags, stable persistent Suno sessions, song library, WAV downloads, and exact AVR N19 processing",
+  "version": "0.5.6",
+  "description": "Suno original-song desktop tool with unified Clerk auth, background polling, automatic WAV and lyrics saving, optional exact AVR N19 processing, and a persistent song library",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "files": [
       "bootstrap.js",
       "main.js",
+      "suno_session.js",
       "deai.js",
       "song_library.js",
       "preload.js",
@@ -36,7 +37,7 @@
     ],
     "win": {
       "target": [{"target":"portable","arch":["x64"]}],
-      "artifactName": "SunoOriginalStudio_v0.5.4.exe"
+      "artifactName": "SunoOriginalStudio_v0.5.6.exe"
     }
   }
 }

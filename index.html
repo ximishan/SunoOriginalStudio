@@ -66,12 +66,16 @@
     .player-seek { margin-top:8px; padding:0; }
     .player-volume { display:flex; align-items:center; gap:7px; min-width:150px; color:#9aa3b5; font-size:11px; }
     .player-volume input { width:105px; padding:0; }
+    .automation-panel { margin-top:14px; padding:12px 14px; border:1px solid #2a3040; border-radius:12px; background:#10141d; }
+    .automation-options { display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+    .automation-option { display:flex; gap:8px; align-items:center; margin:0; font-size:12px; color:#d7deea; }
+    .automation-option input { width:auto; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Suno Original Studio v0.5.4</h1>
-    <div class="sub">原创歌曲 + 持久化歌曲列表 + Suno WAV 下载 + 歌曲列表直接 AVR N19 AI 消痕。</div>
+    <h1>Suno Original Studio v0.5.6</h1>
+    <div class="sub">原创歌曲 + 统一 Suno Session/Auth + 后台自动轮询 + 自动 WAV/歌词保存 + 可选 AVR N19。</div>
 
     <div class="tabs">
       <button id="tabOriginal" class="tab active">原创歌曲</button>
@@ -86,7 +90,7 @@
             <h2>Suno 账号</h2>
             <div id="accounts"></div>
             <div class="actions"><button class="secondary" id="refreshAccounts">刷新登录状态</button></div>
-            <div class="small" style="margin-top:10px">每个槽位使用独立持久化 Session，登录一次后会保留 Cookie。</div>
+            <div class="small" style="margin-top:10px">每个槽位使用独立持久化 Session。短期 __session 过期后会通过 Clerk 长期 Session 自动获取新 token。</div>
           </div>
           <div class="card" style="margin-top:18px">
             <h2>当前任务</h2>
@@ -129,7 +133,7 @@
         <div class="library-summary">
           <div>
             <h2 style="margin-bottom:6px">歌曲列表</h2>
-            <div class="small">提交后的每个 Suno 版本单独记录。已完成 AI 消痕的歌曲会自动锁定并跳过，不会重复处理。</div>
+            <div class="small">后台会自动刷新未完成歌曲。自动下载/N19 开关会持久化，程序重启后继续生效。</div>
           </div>
           <div class="small" id="libraryCount">0 首</div>
         </div>
@@ -140,9 +144,17 @@
           <button id="libraryChooseRoot" class="secondary">选择保存目录</button>
           <button id="libraryOpenRoot" class="secondary">打开保存目录</button>
         </div>
+        <div class="automation-panel">
+          <div class="automation-options">
+            <label class="automation-option"><input id="libraryAutoDownload" class="check" type="checkbox" />生成完成后自动下载 WAV + 保存歌词</label>
+            <label class="automation-option"><input id="libraryAutoN19" class="check" type="checkbox" />下载完成后自动 AVR N19</label>
+            <button id="libraryAutomationNow" class="secondary">立即运行一次</button>
+          </div>
+          <div id="libraryAutomationStatus" class="small" style="margin-top:8px">正在读取后台自动化状态……</div>
+        </div>
         <label>歌曲保存目录</label>
         <div id="libraryRoot" class="path-box">正在读取……</div>
-        <div class="small" style="margin-top:8px">处理完成后，每首歌会建立独立目录，保存“歌词.txt”、“Suno原始.wav”和“消痕-N19.wav”。</div>
+        <div class="small" style="margin-top:8px">每首歌建立独立目录，保存“歌词.txt”、“Suno原始.wav”和可选的“消痕-N19.wav”。</div>
         <div class="player-bar">
           <div class="player-buttons">
             <button id="libraryPlayerToggle" disabled>播放</button>
@@ -180,26 +192,22 @@
       <div class="card">
         <h2>AI 消痕 · AVR N19 原版完整链路</h2>
         <div class="hero-note">
-          这里继续保留“本地文件手动处理”模式。新提交的 Suno 歌曲更推荐直接到 <b>歌曲列表</b> 勾选处理，程序会先从 Suno 获取 WAV，再自动执行完整 N19 链路，并保存歌词与音频文件。<br>
+          这里继续保留“本地文件手动处理”模式。歌曲列表支持手动或自动从 Suno 获取 WAV，再执行完整 N19 链路。<br>
           N19 仍使用 <b>SoX → 节点间响度对齐 → FFmpeg 节点 9（Rubber Band）→ 组合后处理</b>。
         </div>
         <div id="deaiEngine" class="small" style="margin-top:12px">正在校验 AVR N19 原版工具链……</div>
-
         <div class="actions">
           <button id="deaiSelectFiles">选择音频文件</button>
           <button id="deaiSelectOutput" class="secondary">选择输出目录</button>
         </div>
         <div id="deaiFiles" class="file-list"><div class="small" style="padding:10px">尚未选择音频文件。</div></div>
-
         <label>输出目录</label>
         <div id="deaiOutput" class="path-box">未设置（默认在第一个源文件旁创建“AI消痕输出”目录）</div>
-
         <div class="actions">
           <button id="deaiStart" disabled>开始 AI 消痕</button>
           <button id="deaiCancel" class="danger" disabled>取消任务</button>
           <button id="deaiOpenOutput" class="secondary" disabled>打开输出目录</button>
         </div>
-
         <div id="deaiLog" class="log">AI 消痕模块准备就绪。</div>
       </div>
     </section>

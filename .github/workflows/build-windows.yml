@@ -5,28 +5,24 @@ on:
   push:
     branches:
       - main
-      - song-list-player-v0.5.4
     paths:
       - 'bootstrap.js'
       - 'main.js'
+      - 'suno_session.js'
       - 'deai.js'
       - 'song_library.js'
       - 'preload.js'
       - 'renderer.js'
       - 'index.html'
       - 'package.json'
-      - 'tools/apply_negative_style_patch.js'
-      - 'tools/apply_skip_completed_deai_patch.js'
-      - 'tools/apply_song_player_patch.js'
       - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
       - 'THIRD_PARTY_N19.md'
       - 'V0.5_SONG_LIBRARY.md'
       - 'V0.5.2_NEGATIVE_STYLE.md'
       - 'V0.5.3_NO_REPEAT_DEAI.md'
       - 'V0.5.4_SONG_PLAYER.md'
+      - 'V0.5.6_AUTOMATION_PIPELINE.md'
       - 'PROFILE_PERSISTENCE.md'
-      - 'BUGFIX_PLAN_v0.5.1.md'
-      - 'PROFILE_MIGRATION_NOTES.md'
       - '.github/workflows/build-windows.yml'
 
 permissions:
@@ -46,13 +42,16 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.4_Windows
-          exe=SunoOriginalStudio_v0.5.4.exe
+          artifact=SunoOriginalStudio_v0.5.6_Windows
+          exe=SunoOriginalStudio_v0.5.6.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
           song_player=true
-          suno_wav_pipeline=true
+          unified_suno_auth=true
+          background_polling=true
+          auto_wav_download=true
+          auto_n19=true
           stable_session_profile=true
           negative_style=true
           skip_completed_deai=true
@@ -62,7 +61,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Start SunoOriginalStudio v0.5.4 build ${{ github.run_id }}"
+            git commit -m "Start SunoOriginalStudio v0.5.6 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Build status already current.'
@@ -72,34 +71,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Apply v0.5.3 source patch
-        shell: pwsh
-        run: |
-          node tools/apply_skip_completed_deai_patch.js
-          if ($LASTEXITCODE -ne 0) { throw 'v0.5.3 source patch failed' }
-          git add main.js renderer.js song_library.js index.html package.json
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 1) {
-            git commit -m "Skip already processed songs in v0.5.3"
-            git push
-          } else {
-            Write-Host 'v0.5.3 source patch already committed.'
-          }
-
-      - name: Apply v0.5.4 song player patch
-        shell: pwsh
-        run: |
-          node tools/apply_song_player_patch.js
-          if ($LASTEXITCODE -ne 0) { throw 'v0.5.4 song player patch failed' }
-          git add main.js renderer.js song_library.js preload.js index.html package.json PROJECT_STATUS_AND_AVR_FEATURES.md
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 1) {
-            git commit -m "Add song-list player in v0.5.4"
-            git push
-          } else {
-            Write-Host 'v0.5.4 song player patch already committed.'
-          }
 
       - name: Install JavaScript dependencies
         run: npm install
@@ -160,13 +131,11 @@ jobs:
         run: |
           node --check bootstrap.js
           node --check main.js
+          node --check suno_session.js
           node --check deai.js
           node --check song_library.js
           node --check preload.js
           node --check renderer.js
-          node --check tools/apply_negative_style_patch.js
-          node --check tools/apply_skip_completed_deai_patch.js
-          node --check tools/apply_song_player_patch.js
 
       - name: Build portable EXE
         run: npm run dist
@@ -177,19 +146,15 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.4.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.6.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
           $packedSox = 'dist\win-unpacked\resources\tools\n19\sox\sox.exe'
           $ffHash = (Get-FileHash $packedFfmpeg -Algorithm SHA256).Hash.ToLower()
           $soxHash = (Get-FileHash $packedSox -Algorithm SHA256).Hash.ToLower()
-          if ($ffHash -ne '2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3') {
-            throw "Packaged FFmpeg was modified by packaging/signing: $ffHash"
-          }
-          if ($soxHash -ne 'e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439') {
-            throw "Packaged SoX was modified by packaging/signing: $soxHash"
-          }
+          if ($ffHash -ne '2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3') { throw "Packaged FFmpeg was modified by packaging/signing: $ffHash" }
+          if ($soxHash -ne 'e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439') { throw "Packaged SoX was modified by packaging/signing: $soxHash" }
           $filters = & $packedFfmpeg -hide_banner -filters 2>&1 | Out-String
           if ($filters -notmatch 'rubberband') { throw 'Packaged FFmpeg lost rubberband filter' }
           Write-Host "Built:" $exe.FullName $exe.Length
@@ -197,23 +162,23 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.4_Windows
-          path: dist/SunoOriginalStudio_v0.5.4.exe
+          name: SunoOriginalStudio_v0.5.6_Windows
+          path: dist/SunoOriginalStudio_v0.5.6.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.4
-          name: Suno Original Studio v0.5.4
+          tag_name: suno-original-studio-v0.5.6
+          name: Suno Original Studio v0.5.6
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.5.4.exe
+          files: dist/SunoOriginalStudio_v0.5.6.exe
           body: |
-            Adds an integrated music player to the song list with play/pause, stop, seek, time display and volume control.
-            Playback prefers the local N19 WAV, then the local Suno original WAV, then the Suno online audio/CDN source.
-            Keeps persistent login sessions, negative style, no-repeat AI cleaning, Suno WAV workflow, and exact AVR 1.77.0 N19 processing.
+            Unifies Suno Clerk Session/Auth across original generation, status refresh and WAV download.
+            Adds main-process background polling, optional automatic Suno WAV + lyrics saving, and optional automatic exact AVR N19 processing.
+            Keeps persistent 3-account sessions, negative style, no-repeat AI cleaning, song-list playback, and exact AVR 1.77.0 N19 processing.
 
       - name: Report successful build
         shell: pwsh
@@ -222,13 +187,16 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.4_Windows
-          exe=SunoOriginalStudio_v0.5.4.exe
+          artifact=SunoOriginalStudio_v0.5.6_Windows
+          exe=SunoOriginalStudio_v0.5.6.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
           song_player=true
-          suno_wav_pipeline=true
+          unified_suno_auth=true
+          background_polling=true
+          auto_wav_download=true
+          auto_n19=true
           stable_session_profile=true
           negative_style=true
           skip_completed_deai=true
@@ -236,7 +204,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Finish SunoOriginalStudio v0.5.4 build ${{ github.run_id }}"
+            git commit -m "Finish SunoOriginalStudio v0.5.6 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Success status already current.'

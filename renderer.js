@@ -3,7 +3,8 @@ let currentTask = null;
 let selectedDeaiFiles = [];
 let deaiOutputDir = '';
 let deaiRunning = false;
-let songLibrary = { songs: [], rootDir: '' };
+let songLibrary = { songs: [], rootDir: '', automation: {} };
+let songAutomation = { autoDownload: false, autoN19: false, running: false, working: false, lastRunAt: '', lastError: '' };
 let selectedSongIds = new Set();
 let libraryBusy = false;
 const libraryAudio = new Audio();
@@ -72,6 +73,7 @@ function renderTask(task) {
 }
 
 $('refreshAccounts').onclick = refreshAccounts;
+if (window.demoApi.onAccountStateChanged) window.demoApi.onAccountStateChanged(() => refreshAccounts());
 
 if (window.demoApi.onVerificationState) {
   window.demoApi.onVerificationState((state) => {
@@ -142,29 +144,19 @@ function generationBadge(status) {
   return [raw === 'submitted' ? '已提交' : raw, 'warn'];
 }
 function wavBadge(status) {
-  const map = {
-    not_downloaded: ['未下载', ''], downloading: ['下载中', 'warn'], downloaded: ['已下载', 'ok'], error: ['下载失败', 'err'],
-  };
+  const map = { not_downloaded:['未下载',''], downloading:['下载中','warn'], downloaded:['已下载','ok'], error:['下载失败','err'] };
   return map[status] || [status || '未下载', ''];
 }
 function deaiBadge(status) {
-  const map = {
-    not_processed: ['未处理', ''], waiting: ['等待处理', 'warn'], processing: ['处理中', 'warn'], complete: ['已完成', 'ok'], error: ['处理失败', 'err'],
-  };
+  const map = { not_processed:['未处理',''], waiting:['等待处理','warn'], processing:['处理中','warn'], complete:['已完成','ok'], error:['处理失败','err'] };
   return map[status] || [status || '未处理', ''];
 }
 function localBadge(status) {
-  const map = {
-    not_saved: ['未保存', ''], saving: ['保存中', 'warn'], saved: ['已保存', 'ok'], error: ['保存失败', 'err'],
-  };
+  const map = { not_saved:['未保存',''], saving:['保存中','warn'], saved:['已保存','ok'], error:['保存失败','err'] };
   return map[status] || [status || '未保存', ''];
 }
-function badgeHtml(pair) {
-  return `<span class="badge ${pair[1] || ''}">${escapeHtml(pair[0])}</span>`;
-}
-function isSongComplete(song) {
-  return /^(complete|completed)$/i.test(String(song.generationStatus || ''));
-}
+function badgeHtml(pair) { return `<span class="badge ${pair[1] || ''}">${escapeHtml(pair[0])}</span>`; }
+function isSongComplete(song) { return /^(complete|completed)$/i.test(String(song.generationStatus || '')); }
 
 function formatPlayerTime(value) {
   const seconds = Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
@@ -181,14 +173,12 @@ function refreshPlayerUi() {
   const title = $('libraryPlayerTitle');
   const source = $('libraryPlayerSource');
   if (!toggle) return;
-
   const hasTrack = Boolean(playingClipId && libraryAudio.src);
   toggle.disabled = !hasTrack;
   stop.disabled = !hasTrack;
   toggle.textContent = hasTrack && !libraryAudio.paused ? '暂停' : '播放';
   if (title) title.textContent = playingSource?.title || '还没有选择歌曲';
   if (source) source.textContent = playingSource?.label || '点击歌曲右侧“试听”开始播放';
-
   const duration = Number.isFinite(libraryAudio.duration) ? libraryAudio.duration : 0;
   if (seek && !playerSeeking) {
     seek.disabled = !hasTrack || !duration;
@@ -196,7 +186,6 @@ function refreshPlayerUi() {
     seek.value = Number.isFinite(libraryAudio.currentTime) ? libraryAudio.currentTime : 0;
   }
   if (time) time.textContent = `${formatPlayerTime(libraryAudio.currentTime)} / ${formatPlayerTime(duration)}`;
-
   document.querySelectorAll('[data-play-song]').forEach(btn => {
     const same = btn.dataset.playSong === playingClipId;
     btn.textContent = same ? (libraryAudio.paused ? '继续' : '暂停') : '试听';
@@ -206,12 +195,10 @@ function refreshPlayerUi() {
 async function playSongFromLibrary(clipId) {
   try {
     if (playingClipId === clipId && libraryAudio.src) {
-      if (libraryAudio.paused) await libraryAudio.play();
-      else libraryAudio.pause();
+      if (libraryAudio.paused) await libraryAudio.play(); else libraryAudio.pause();
       refreshPlayerUi();
       return;
     }
-
     const source = await window.demoApi.getSongPlaySource(clipId);
     if (!source?.url) throw new Error('没有取得可播放的音频地址');
     libraryAudio.pause();
@@ -237,15 +224,26 @@ libraryAudio.addEventListener('loadedmetadata', refreshPlayerUi);
 libraryAudio.addEventListener('durationchange', refreshPlayerUi);
 libraryAudio.addEventListener('timeupdate', refreshPlayerUi);
 libraryAudio.addEventListener('ended', () => { libraryAudio.currentTime = 0; refreshPlayerUi(); });
-libraryAudio.addEventListener('error', () => {
-  if (playingClipId) libraryLog(`试听失败：${playingSource?.title || playingClipId}`, 'err');
-  refreshPlayerUi();
-});
+libraryAudio.addEventListener('error', () => { if (playingClipId) libraryLog(`试听失败：${playingSource?.title || playingClipId}`, 'err'); refreshPlayerUi(); });
+
+function renderAutomationUi() {
+  const autoDownload = $('libraryAutoDownload');
+  const autoN19 = $('libraryAutoN19');
+  const status = $('libraryAutomationStatus');
+  if (autoDownload) autoDownload.checked = Boolean(songAutomation.autoDownload);
+  if (autoN19) autoN19.checked = Boolean(songAutomation.autoN19);
+  if (status) {
+    const text = songAutomation.working ? '后台处理中' : (songAutomation.running ? '后台轮询运行中' : '后台轮询已停止');
+    status.textContent = songAutomation.lastError ? `${text} · 最近错误：${songAutomation.lastError}` : text;
+    status.className = songAutomation.lastError ? 'small err' : (songAutomation.working ? 'small warn' : 'small oktxt');
+  }
+}
 
 function renderSongLibrary() {
   const songs = songLibrary.songs || [];
   $('libraryRoot').textContent = songLibrary.rootDir || '未设置';
   $('libraryCount').textContent = `${songs.length} 首`;
+  renderAutomationUi();
   const body = $('songTableBody');
   if (!songs.length) {
     body.innerHTML = '<tr><td colspan="8" class="library-empty">还没有歌曲。提交原创后会自动出现在这里。</td></tr>';
@@ -263,28 +261,16 @@ function renderSongLibrary() {
     return `<tr>
       <td><input class="check song-check" type="checkbox" data-clip="${escapeHtml(song.clipId)}" ${checked} ${canSelect ? '' : 'disabled'} /></td>
       <td class="title-cell"><b>${escapeHtml(song.title || '未命名')}</b><div class="small">版本 ${song.version || 1} · ${escapeHtml(String(song.clipId).slice(0,8))}${song.duration ? ` · ${Number(song.duration).toFixed(1)}s` : ''}</div>${err}</td>
-      <td>账号 ${escapeHtml(song.slot)}</td>
-      <td>${badgeHtml(g)}</td>
-      <td>${badgeHtml(w)}</td>
-      <td>${badgeHtml(d)}</td>
-      <td>${badgeHtml(l)}</td>
+      <td>账号 ${escapeHtml(song.slot)}</td><td>${badgeHtml(g)}</td><td>${badgeHtml(w)}</td><td>${badgeHtml(d)}</td><td>${badgeHtml(l)}</td>
       <td><div class="inline-actions"><button class="secondary" data-play-song="${escapeHtml(song.clipId)}" ${isSongComplete(song) || song.audioUrl || song.sourceWavPath || song.processedWavPath ? '' : 'disabled'}>试听</button><button class="secondary" data-open-suno="${escapeHtml(song.clipId)}">Suno</button>${song.localDir ? `<button class="secondary" data-open-local="${escapeHtml(song.clipId)}">本地</button>` : ''}</div></td>
     </tr>`;
   }).join('');
-
   body.querySelectorAll('.song-check').forEach(box => {
-    box.onchange = () => {
-      if (box.checked) selectedSongIds.add(box.dataset.clip);
-      else selectedSongIds.delete(box.dataset.clip);
-      syncMasterCheck();
-    };
+    box.onchange = () => { if (box.checked) selectedSongIds.add(box.dataset.clip); else selectedSongIds.delete(box.dataset.clip); syncMasterCheck(); };
   });
   body.querySelectorAll('[data-play-song]').forEach(btn => btn.onclick = () => playSongFromLibrary(btn.dataset.playSong));
   body.querySelectorAll('[data-open-suno]').forEach(btn => btn.onclick = () => window.demoApi.openSong(`https://suno.com/song/${btn.dataset.openSuno}`));
-  body.querySelectorAll('[data-open-local]').forEach(btn => btn.onclick = async () => {
-    try { await window.demoApi.openSongLocalDir(btn.dataset.openLocal); }
-    catch (e) { libraryLog(e?.message || e, 'err'); }
-  });
+  body.querySelectorAll('[data-open-local]').forEach(btn => btn.onclick = async () => { try { await window.demoApi.openSongLocalDir(btn.dataset.openLocal); } catch (e) { libraryLog(e?.message || e, 'err'); } });
   syncMasterCheck();
   refreshPlayerUi();
 }
@@ -299,99 +285,53 @@ function syncMasterCheck() {
 async function loadSongLibrary(refreshFromSuno = false) {
   try {
     songLibrary = refreshFromSuno ? await window.demoApi.refreshSongLibrary() : await window.demoApi.listSongs();
+    songAutomation = { ...songAutomation, ...(songLibrary.automation || {}) };
+    try { songAutomation = { ...songAutomation, ...(await window.demoApi.getSongAutomation()) }; } catch {}
     const existingIds = new Set((songLibrary.songs || []).map(x => x.clipId));
     selectedSongIds = new Set([...selectedSongIds].filter(id => existingIds.has(id)));
     renderSongLibrary();
-  } catch (e) {
-    libraryLog(e?.message || e, 'err');
-  }
+  } catch (e) { libraryLog(e?.message || e, 'err'); }
 }
 
 $('libraryPlayerToggle').onclick = async () => {
   if (!playingClipId || !libraryAudio.src) return;
-  try {
-    if (libraryAudio.paused) await libraryAudio.play();
-    else libraryAudio.pause();
-  } catch (e) {
-    libraryLog(e?.message || e, 'err');
-  }
+  try { if (libraryAudio.paused) await libraryAudio.play(); else libraryAudio.pause(); } catch (e) { libraryLog(e?.message || e, 'err'); }
   refreshPlayerUi();
 };
+$('libraryPlayerStop').onclick = () => { libraryAudio.pause(); try { libraryAudio.currentTime = 0; } catch {} refreshPlayerUi(); };
+$('libraryPlayerSeek').addEventListener('input', () => { playerSeeking = true; const value = Number($('libraryPlayerSeek').value || 0); $('libraryPlayerTime').textContent = `${formatPlayerTime(value)} / ${formatPlayerTime(libraryAudio.duration)}`; });
+$('libraryPlayerSeek').addEventListener('change', () => { const value = Number($('libraryPlayerSeek').value || 0); if (Number.isFinite(value)) libraryAudio.currentTime = value; playerSeeking = false; refreshPlayerUi(); });
+$('libraryPlayerVolume').addEventListener('input', () => { libraryAudio.volume = Math.max(0, Math.min(1, Number($('libraryPlayerVolume').value || 0) / 100)); });
 
-$('libraryPlayerStop').onclick = () => {
-  libraryAudio.pause();
-  try { libraryAudio.currentTime = 0; } catch {}
-  refreshPlayerUi();
+$('libraryAutoDownload').onchange = async () => {
+  try { songAutomation = await window.demoApi.setSongAutomation({ autoDownload: $('libraryAutoDownload').checked }); renderAutomationUi(); }
+  catch (e) { libraryLog(e?.message || e, 'err'); }
 };
-
-$('libraryPlayerSeek').addEventListener('input', () => {
-  playerSeeking = true;
-  const value = Number($('libraryPlayerSeek').value || 0);
-  $('libraryPlayerTime').textContent = `${formatPlayerTime(value)} / ${formatPlayerTime(libraryAudio.duration)}`;
-});
-$('libraryPlayerSeek').addEventListener('change', () => {
-  const value = Number($('libraryPlayerSeek').value || 0);
-  if (Number.isFinite(value)) libraryAudio.currentTime = value;
-  playerSeeking = false;
-  refreshPlayerUi();
-});
-$('libraryPlayerVolume').addEventListener('input', () => {
-  libraryAudio.volume = Math.max(0, Math.min(1, Number($('libraryPlayerVolume').value || 0) / 100));
-});
+$('libraryAutoN19').onchange = async () => {
+  try { songAutomation = await window.demoApi.setSongAutomation({ autoN19: $('libraryAutoN19').checked }); if (songAutomation.autoN19) $('libraryAutoDownload').checked = true; renderAutomationUi(); }
+  catch (e) { libraryLog(e?.message || e, 'err'); }
+};
+$('libraryAutomationNow').onclick = async () => {
+  try { songAutomation = await window.demoApi.runSongAutomationNow(); renderAutomationUi(); await loadSongLibrary(false); }
+  catch (e) { libraryLog(e?.message || e, 'err'); }
+};
 
 $('libraryRefresh').onclick = async () => {
   if (libraryBusy) return;
   libraryBusy = true;
   $('libraryRefresh').disabled = true;
-  try {
-    libraryLog('正在刷新所有歌曲的 Suno 状态……');
-    await loadSongLibrary(true);
-    libraryLog('歌曲状态已刷新。', 'oktxt');
-  } finally {
-    libraryBusy = false;
-    $('libraryRefresh').disabled = false;
-  }
+  try { libraryLog('正在刷新所有歌曲的 Suno 状态……'); await loadSongLibrary(true); libraryLog('歌曲状态已刷新。', 'oktxt'); }
+  finally { libraryBusy = false; $('libraryRefresh').disabled = false; }
 };
-
-$('librarySelectAll').onclick = () => {
-  selectedSongIds.clear();
-  for (const song of songLibrary.songs || []) {
-    if (isSongComplete(song) && song.deaiStatus !== 'processing' && song.deaiStatus !== 'complete') selectedSongIds.add(song.clipId);
-  }
-  renderSongLibrary();
-};
-
-$('libraryMasterCheck').onchange = () => {
-  const checked = $('libraryMasterCheck').checked;
-  document.querySelectorAll('.song-check:not(:disabled)').forEach(box => {
-    box.checked = checked;
-    if (checked) selectedSongIds.add(box.dataset.clip);
-    else selectedSongIds.delete(box.dataset.clip);
-  });
-};
-
-$('libraryChooseRoot').onclick = async () => {
-  try {
-    songLibrary = await window.demoApi.selectSongRoot();
-    renderSongLibrary();
-    libraryLog(`保存目录：${songLibrary.rootDir}`, 'oktxt');
-  } catch (e) {
-    libraryLog(e?.message || e, 'err');
-  }
-};
-
-$('libraryOpenRoot').onclick = async () => {
-  try { await window.demoApi.openSongRoot(); }
-  catch (e) { libraryLog(e?.message || e, 'err'); }
-};
+$('librarySelectAll').onclick = () => { selectedSongIds.clear(); for (const song of songLibrary.songs || []) if (isSongComplete(song) && song.deaiStatus !== 'processing' && song.deaiStatus !== 'complete') selectedSongIds.add(song.clipId); renderSongLibrary(); };
+$('libraryMasterCheck').onchange = () => { const checked = $('libraryMasterCheck').checked; document.querySelectorAll('.song-check:not(:disabled)').forEach(box => { box.checked = checked; if (checked) selectedSongIds.add(box.dataset.clip); else selectedSongIds.delete(box.dataset.clip); }); };
+$('libraryChooseRoot').onclick = async () => { try { songLibrary = await window.demoApi.selectSongRoot(); renderSongLibrary(); libraryLog(`保存目录：${songLibrary.rootDir}`, 'oktxt'); } catch (e) { libraryLog(e?.message || e, 'err'); } };
+$('libraryOpenRoot').onclick = async () => { try { await window.demoApi.openSongRoot(); } catch (e) { libraryLog(e?.message || e, 'err'); } };
 
 $('libraryProcessSelected').onclick = async () => {
   if (libraryBusy) return;
   const ids = [...selectedSongIds];
-  if (!ids.length) {
-    alert('请先勾选至少一首已经生成完成的歌曲。');
-    return;
-  }
+  if (!ids.length) { alert('请先勾选至少一首已经生成完成的歌曲。'); return; }
   libraryBusy = true;
   $('libraryProcessSelected').disabled = true;
   $('libraryRefresh').disabled = true;
@@ -404,23 +344,19 @@ $('libraryProcessSelected').onclick = async () => {
     libraryLog(`处理完成：新处理成功 ${result.successCount}，已消痕跳过 ${skipped}${failed.length ? `，失败 ${failed.length}` : ''}。`, failed.length ? 'warn' : 'oktxt');
     selectedSongIds.clear();
     renderSongLibrary();
-  } catch (e) {
-    libraryLog(e?.message || e, 'err');
-  } finally {
-    libraryBusy = false;
-    $('libraryProcessSelected').disabled = false;
-    $('libraryRefresh').disabled = false;
-  }
+  } catch (e) { libraryLog(e?.message || e, 'err'); }
+  finally { libraryBusy = false; $('libraryProcessSelected').disabled = false; $('libraryRefresh').disabled = false; }
 };
 
 if (window.demoApi.onSongLibraryChanged) {
   window.demoApi.onSongLibraryChanged((event) => {
     if (!event) return;
     if (event.type === 'progress' && event.message) libraryLog(`${String(event.clipId || '').slice(0,8)}：${event.message}`);
+    if (event.type === 'automation-state' && event.automation) { songAutomation = { ...songAutomation, ...event.automation }; renderAutomationUi(); }
+    if (event.type === 'library-refreshed') loadSongLibrary(false);
     if (event.type === 'song-updated' && event.song) {
       const index = (songLibrary.songs || []).findIndex(x => x.clipId === event.song.clipId);
-      if (index >= 0) songLibrary.songs[index] = event.song;
-      else songLibrary.songs.unshift(event.song);
+      if (index >= 0) songLibrary.songs[index] = event.song; else songLibrary.songs.unshift(event.song);
       renderSongLibrary();
     }
   });
@@ -428,49 +364,12 @@ if (window.demoApi.onSongLibraryChanged) {
 
 function renderDeaiFiles() {
   const root = $('deaiFiles');
-  if (!selectedDeaiFiles.length) {
-    root.innerHTML = '<div class="small" style="padding:10px">尚未选择音频文件。</div>';
-    return;
-  }
+  if (!selectedDeaiFiles.length) { root.innerHTML = '<div class="small" style="padding:10px">尚未选择音频文件。</div>'; return; }
   root.innerHTML = selectedDeaiFiles.map((file, i) => `<div class="file-row"><span>${i + 1}. ${escapeHtml(file)}</span></div>`).join('');
 }
-
-function setDeaiRunning(running) {
-  deaiRunning = running;
-  $('deaiStart').disabled = running || !selectedDeaiFiles.length;
-  $('deaiCancel').disabled = !running;
-  $('deaiSelectFiles').disabled = running;
-  $('deaiSelectOutput').disabled = running;
-}
-
-$('deaiSelectFiles').onclick = async () => {
-  try {
-    const files = await window.demoApi.selectDeaiFiles();
-    if (files?.length) {
-      selectedDeaiFiles = files;
-      renderDeaiFiles();
-      setDeaiRunning(false);
-      deaiLog(`已选择 ${files.length} 个音频文件。`);
-    }
-  } catch (e) {
-    deaiLog(e?.message || e, 'err');
-  }
-};
-
-$('deaiSelectOutput').onclick = async () => {
-  try {
-    const dir = await window.demoApi.selectDeaiOutputDir();
-    if (dir) {
-      deaiOutputDir = dir;
-      $('deaiOutput').textContent = dir;
-      $('deaiOpenOutput').disabled = false;
-      deaiLog(`输出目录：${dir}`);
-    }
-  } catch (e) {
-    deaiLog(e?.message || e, 'err');
-  }
-};
-
+function setDeaiRunning(running) { deaiRunning = running; $('deaiStart').disabled = running || !selectedDeaiFiles.length; $('deaiCancel').disabled = !running; $('deaiSelectFiles').disabled = running; $('deaiSelectOutput').disabled = running; }
+$('deaiSelectFiles').onclick = async () => { try { const files = await window.demoApi.selectDeaiFiles(); if (files?.length) { selectedDeaiFiles = files; renderDeaiFiles(); setDeaiRunning(false); deaiLog(`已选择 ${files.length} 个音频文件。`); } } catch (e) { deaiLog(e?.message || e, 'err'); } };
+$('deaiSelectOutput').onclick = async () => { try { const dir = await window.demoApi.selectDeaiOutputDir(); if (dir) { deaiOutputDir = dir; $('deaiOutput').textContent = dir; $('deaiOpenOutput').disabled = false; deaiLog(`输出目录：${dir}`); } } catch (e) { deaiLog(e?.message || e, 'err'); } };
 $('deaiStart').onclick = async () => {
   if (!selectedDeaiFiles.length || deaiRunning) return;
   setDeaiRunning(true);
@@ -482,34 +381,12 @@ $('deaiStart').onclick = async () => {
     $('deaiOpenOutput').disabled = !deaiOutputDir;
     const failed = (result.results || []).filter(x => !x.ok);
     deaiLog(`处理完成：成功 ${result.successCount}/${result.total}${failed.length ? `，失败 ${failed.length}` : ''}。`, failed.length ? 'warn' : 'oktxt');
-  } catch (e) {
-    deaiLog(e?.message || e, 'err');
-  } finally {
-    setDeaiRunning(false);
-  }
+  } catch (e) { deaiLog(e?.message || e, 'err'); }
+  finally { setDeaiRunning(false); }
 };
-
-$('deaiCancel').onclick = async () => {
-  try {
-    await window.demoApi.cancelDeai();
-    deaiLog('已请求取消当前 AI 消痕任务。', 'warn');
-  } catch (e) {
-    deaiLog(e?.message || e, 'err');
-  }
-};
-
-$('deaiOpenOutput').onclick = async () => {
-  try { await window.demoApi.openDeaiOutputDir(deaiOutputDir); }
-  catch (e) { deaiLog(e?.message || e, 'err'); }
-};
-
-if (window.demoApi.onDeaiProgress) {
-  window.demoApi.onDeaiProgress((state) => {
-    if (!state) return;
-    const cls = state.state === 'file-error' ? 'err' : state.state === 'complete' || state.state === 'file-complete' ? 'oktxt' : state.state === 'cancelled' ? 'warn' : '';
-    if (state.message) deaiLog(state.message, cls);
-  });
-}
+$('deaiCancel').onclick = async () => { try { await window.demoApi.cancelDeai(); deaiLog('已请求取消当前 AI 消痕任务。', 'warn'); } catch (e) { deaiLog(e?.message || e, 'err'); } };
+$('deaiOpenOutput').onclick = async () => { try { await window.demoApi.openDeaiOutputDir(deaiOutputDir); } catch (e) { deaiLog(e?.message || e, 'err'); } };
+if (window.demoApi.onDeaiProgress) window.demoApi.onDeaiProgress((state) => { if (!state) return; const cls = state.state === 'file-error' ? 'err' : state.state === 'complete' || state.state === 'file-complete' ? 'oktxt' : state.state === 'cancelled' ? 'warn' : ''; if (state.message) deaiLog(state.message, cls); });
 
 async function loadDeaiEngineInfo() {
   try {
@@ -522,12 +399,7 @@ async function loadDeaiEngineInfo() {
   }
 }
 
-setInterval(async () => {
-  if (libraryBusy) return;
-  const pending = (songLibrary.songs || []).some(song => !isSongComplete(song) && !/^(error|failed)$/i.test(song.generationStatus || ''));
-  if (pending) await loadSongLibrary(true);
-}, 10000);
-
+setInterval(async () => { if (!libraryBusy) await loadSongLibrary(false); }, 15000);
 refreshAccounts();
 renderDeaiFiles();
 setDeaiRunning(false);

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, session, shell } = require('electron');
 const path = require('path');
 const { randomUUID } = require('crypto');
+const { partitionFor, apiHeaders, getAccountStatus } = require('./suno_session');
 
 const SUNO_HOME = 'https://suno.com/';
 const SUNO_CREATE = 'https://suno.com/create';
@@ -21,10 +22,6 @@ const accountWindows = new Map();
 const verificationActiveSlots = new Set();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-function partitionFor(slot) {
-  return `persist:suno-original-demo-${slot}`;
-}
 
 function emitVerification(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -82,9 +79,7 @@ async function ensureAccountWindow(slot, show = false, target = SUNO_HOME) {
   slot = String(slot);
   let win = accountWindows.get(slot);
   if (win && !win.isDestroyed()) {
-    if (target && !win.webContents.getURL().startsWith(target)) {
-      await win.loadURL(target);
-    }
+    if (target && !win.webContents.getURL().startsWith(target)) await win.loadURL(target);
     if (show) {
       if (win.isMinimized()) win.restore();
       win.show();
@@ -140,69 +135,12 @@ async function waitReady(win, timeoutMs = 30000) {
 
 async function accountStatus(slot) {
   slot = String(slot);
-  const ses = session.fromPartition(partitionFor(slot));
-  const cookies = await ses.cookies.get({ url: SUNO_HOME });
-  let loggedIn = cookies.some(c => c.name === '__session' || c.name.startsWith('__session_'));
+  const shared = await getAccountStatus(slot);
   const win = accountWindows.get(slot);
-  if (loggedIn && win && !win.isDestroyed() && win.webContents.getURL().startsWith('https://suno.com/')) {
-    try {
-      const state = await win.webContents.executeJavaScript(`(() => {
-        if (window.Clerk !== undefined) return Boolean(window.Clerk?.session);
-        return null;
-      })()`);
-      if (typeof state === 'boolean') loggedIn = state;
-    } catch {}
-  }
   return {
-    slot,
-    loggedIn,
-    partition: partitionFor(slot),
+    ...shared,
     windowOpen: !!(win && !win.isDestroyed()),
     verificationActive: verificationActiveSlots.has(slot),
-  };
-}
-
-async function getAuthToken(slot) {
-  const win = await ensureAccountWindow(slot, false, SUNO_STUDIO);
-  if (!win.webContents.getURL().startsWith('https://suno.com/')) await win.loadURL(SUNO_STUDIO);
-  await waitReady(win);
-  const token = await win.webContents.executeJavaScript(`(async () => {
-    for (let i = 0; i < 24; i++) {
-      if (window.Clerk?.session) break;
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    try {
-      const t = await window.Clerk?.session?.getToken?.();
-      if (t) return t;
-    } catch {}
-    const cookie = Object.fromEntries(document.cookie.split(';').map(part => {
-      const [key, ...rest] = part.trim().split('=');
-      return [key, rest.join('=')];
-    }));
-    return cookie.__session || Object.entries(cookie).find(([k]) => k.startsWith('__session'))?.[1] || '';
-  })()`);
-  if (!String(token || '').trim()) {
-    throw new Error(`账号 ${slot} 尚未登录，请先点击“登录/打开”完成 Suno 登录`);
-  }
-  return String(token).trim();
-}
-
-function browserToken() {
-  return JSON.stringify({
-    token: Buffer.from(JSON.stringify({ timestamp: Date.now() }), 'utf8').toString('base64'),
-  });
-}
-
-async function apiHeaders(slot) {
-  const token = await getAuthToken(slot);
-  const ses = session.fromPartition(partitionFor(slot));
-  const cookies = await ses.cookies.get({ url: SUNO_HOME });
-  const device = cookies.find(c => c.name === 'suno_device_id')?.value || '';
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'Browser-Token': browserToken(),
-    ...(device ? { 'Device-Id': device } : {}),
   };
 }
 
@@ -214,24 +152,12 @@ async function precheckVerification(slot, headers) {
       headers,
       body: JSON.stringify({ ctype: 'generation' }),
     });
-    if (!res.ok) {
-      return { known: false, required: false, httpStatus: res.status, captchaProvider: 2 };
-    }
+    if (!res.ok) return { known: false, required: false, httpStatus: res.status, captchaProvider: 2 };
     const data = await res.json().catch(() => ({}));
     const captchaProvider = Number(data.captcha_version) === 1 ? 1 : 2;
-    return {
-      known: true,
-      required: !!data.required,
-      captchaVersion: data.captcha_version,
-      captchaProvider,
-    };
+    return { known: true, required: !!data.required, captchaVersion: data.captcha_version, captchaProvider };
   } catch (e) {
-    return {
-      known: false,
-      required: false,
-      captchaProvider: 2,
-      error: String(e?.message || e),
-    };
+    return { known: false, required: false, captchaProvider: 2, error: String(e?.message || e) };
   }
 }
 
@@ -285,25 +211,19 @@ function buildTurnstileVerificationScript() {
     const cleanup = () => {
       clearTimeout(retryTimer);
       clearTimeout(timeoutTimer);
-      try {
-        if (widgetId !== undefined && window.turnstile) window.turnstile.remove(widgetId);
-      } catch {}
+      try { if (widgetId !== undefined && window.turnstile) window.turnstile.remove(widgetId); } catch {}
       overlay.remove();
     };
-
     const finish = (token, error) => {
       if (settled) return;
       settled = true;
       cleanup();
-      if (error) reject(new Error(error));
-      else resolve(token);
+      if (error) reject(new Error(error)); else resolve(token);
     };
-
     const armTimeout = () => {
       clearTimeout(timeoutTimer);
       timeoutTimer = setTimeout(() => finish(null, 'Suno 人机验证等待超过 5 分钟'), ${VERIFICATION_TIMEOUT_MS});
     };
-
     const retry = (reason) => {
       if (settled) return;
       retryCount += 1;
@@ -321,12 +241,9 @@ function buildTurnstileVerificationScript() {
             widgetId = undefined;
           }
           loadScript();
-        } catch (error) {
-          retry(error instanceof Error ? error.message : String(error));
-        }
+        } catch (error) { retry(error instanceof Error ? error.message : String(error)); }
       }, 1000 * retryCount);
     };
-
     const render = () => {
       try {
         status.textContent = '请在下方完成 Cloudflare 验证；通过后任务会自动继续。';
@@ -342,16 +259,10 @@ function buildTurnstileVerificationScript() {
           'before-interactive-callback': () => { status.textContent = '请完成下方 Cloudflare 验证…'; },
           'after-interactive-callback': () => { status.textContent = '验证已提交，正在等待结果…'; },
         });
-      } catch (error) {
-        retry(error instanceof Error ? error.message : String(error));
-      }
+      } catch (error) { retry(error instanceof Error ? error.message : String(error)); }
     };
-
     const loadScript = () => {
-      if (window.turnstile?.render) {
-        render();
-        return;
-      }
+      if (window.turnstile?.render) { render(); return; }
       document.querySelector('script[data-suno-original-turnstile]')?.remove();
       const script = document.createElement('script');
       script.dataset.sunoOriginalTurnstile = '1';
@@ -362,7 +273,6 @@ function buildTurnstileVerificationScript() {
       script.onerror = () => retry('无法加载 Cloudflare 官方验证组件');
       document.head.appendChild(script);
     };
-
     retryButton.onclick = () => {
       retryCount = 0;
       retryButton.style.display = 'none';
@@ -374,7 +284,6 @@ function buildTurnstileVerificationScript() {
       loadScript();
     };
     cancelButton.onclick = () => finish(null, '用户取消了 Suno 人机验证');
-
     armTimeout();
     loadScript();
   }))()`;
@@ -427,26 +336,20 @@ function buildHcaptchaVerificationScript() {
     const cleanup = () => {
       clearTimeout(retryTimer);
       clearTimeout(timeoutTimer);
-      try {
-        if (widgetId !== undefined && window.hcaptcha) window.hcaptcha.remove(widgetId);
-      } catch {}
+      try { if (widgetId !== undefined && window.hcaptcha) window.hcaptcha.remove(widgetId); } catch {}
       overlay.remove();
       try { delete window.__sunoOriginalHcaptchaOnLoad; } catch {}
     };
-
     const finish = (token, error) => {
       if (settled) return;
       settled = true;
       cleanup();
-      if (error) reject(new Error(error));
-      else resolve(token);
+      if (error) reject(new Error(error)); else resolve(token);
     };
-
     const armTimeout = () => {
       clearTimeout(timeoutTimer);
       timeoutTimer = setTimeout(() => finish(null, 'Suno 人机验证等待超过 5 分钟'), ${VERIFICATION_TIMEOUT_MS});
     };
-
     const retry = (reason) => {
       if (settled) return;
       retryCount += 1;
@@ -462,15 +365,10 @@ function buildHcaptchaVerificationScript() {
           if (window.hcaptcha?.reset && widgetId !== undefined) {
             try { window.hcaptcha.reset(widgetId); } catch {}
             window.hcaptcha.execute(widgetId);
-          } else {
-            loadScript();
-          }
-        } catch (error) {
-          retry(error instanceof Error ? error.message : String(error));
-        }
+          } else loadScript();
+        } catch (error) { retry(error instanceof Error ? error.message : String(error)); }
       }, 1000 * retryCount);
     };
-
     const render = () => {
       try {
         status.textContent = '正在进行 hCaptcha 验证；需要操作时会弹出官方挑战。';
@@ -486,20 +384,13 @@ function buildHcaptchaVerificationScript() {
           'close-callback': () => { status.textContent = '验证窗口已关闭，正在确认结果…'; },
         });
         window.hcaptcha.execute(widgetId);
-      } catch (error) {
-        retry(error instanceof Error ? error.message : String(error));
-      }
+      } catch (error) { retry(error instanceof Error ? error.message : String(error)); }
     };
-
     const loadScript = () => {
-      if (window.hcaptcha?.render) {
-        render();
-        return;
-      }
+      if (window.hcaptcha?.render) { render(); return; }
       document.querySelector('script[data-suno-original-hcaptcha]')?.remove();
       const query = new URLSearchParams({
-        onload: '__sunoOriginalHcaptchaOnLoad',
-        render: 'explicit',
+        onload: '__sunoOriginalHcaptchaOnLoad', render: 'explicit',
         endpoint: 'https://hcaptcha-endpoint-' + env + '.suno.com',
         assethost: 'https://hcaptcha-assets-' + env + '.suno.com',
         imghost: 'https://hcaptcha-imgs-' + env + '.suno.com',
@@ -514,7 +405,6 @@ function buildHcaptchaVerificationScript() {
       script.onerror = () => retry('无法加载 hCaptcha 官方验证组件');
       document.head.appendChild(script);
     };
-
     retryButton.onclick = () => {
       retryCount = 0;
       retryButton.style.display = 'none';
@@ -526,7 +416,6 @@ function buildHcaptchaVerificationScript() {
       loadScript();
     };
     cancelButton.onclick = () => finish(null, '用户取消了 Suno 人机验证');
-
     armTimeout();
     loadScript();
   }))()`;
@@ -547,28 +436,15 @@ async function runOfficialVerification(slot, provider, title = '') {
   win.moveTop();
   win.setAlwaysOnTop(true, 'floating');
   emitVerification({
-    state: 'required',
-    slot,
-    title,
-    provider,
-    message: provider === 1
-      ? '已打开账号窗口，正在加载 Suno 官方 hCaptcha。'
-      : '已打开账号窗口，正在加载 Suno 官方 Cloudflare Turnstile。',
+    state: 'required', slot, title, provider,
+    message: provider === 1 ? '已打开账号窗口，正在加载 Suno 官方 hCaptcha。' : '已打开账号窗口，正在加载 Suno 官方 Cloudflare Turnstile。',
   });
 
   try {
-    const script = provider === 1
-      ? buildHcaptchaVerificationScript()
-      : buildTurnstileVerificationScript();
+    const script = provider === 1 ? buildHcaptchaVerificationScript() : buildTurnstileVerificationScript();
     const token = await win.webContents.executeJavaScript(script);
     if (!String(token || '').trim()) throw new Error('Suno 人机验证没有返回有效 token');
-    emitVerification({
-      state: 'passed',
-      slot,
-      title,
-      provider,
-      message: 'Suno 官方验证已通过，正在自动继续刚才的原创任务。',
-    });
+    emitVerification({ state: 'passed', slot, title, provider, message: 'Suno 官方验证已通过，正在自动继续刚才的原创任务。' });
     return { token: String(token), tokenProvider: provider };
   } finally {
     verificationActiveSlots.delete(slot);
@@ -586,17 +462,9 @@ async function runOfficialVerification(slot, provider, title = '') {
 
 function buildOriginalPayload(input, verification = {}) {
   const sliders = {};
-  if (Number.isFinite(Number(input.weirdness))) {
-    sliders.weirdness_constraint = Math.max(0, Math.min(1, Number(input.weirdness) / 100));
-  }
-  if (Number.isFinite(Number(input.styleInfluence))) {
-    sliders.style_weight = Math.max(0, Math.min(1, Number(input.styleInfluence) / 100));
-  }
-  const genderTag = input.vocalGender === 'female'
-    ? 'female vocal'
-    : input.vocalGender === 'male'
-      ? 'male vocal'
-      : '';
+  if (Number.isFinite(Number(input.weirdness))) sliders.weirdness_constraint = Math.max(0, Math.min(1, Number(input.weirdness) / 100));
+  if (Number.isFinite(Number(input.styleInfluence))) sliders.style_weight = Math.max(0, Math.min(1, Number(input.styleInfluence) / 100));
+  const genderTag = input.vocalGender === 'female' ? 'female vocal' : input.vocalGender === 'male' ? 'male vocal' : '';
   const tags = [String(input.stylePrompt || '').trim(), genderTag].filter(Boolean).join(', ');
 
   return {
@@ -611,32 +479,14 @@ function buildOriginalPayload(input, verification = {}) {
     make_instrumental: false,
     user_uploaded_images_b64: null,
     metadata: {
-      web_client_pathname: '/create',
-      is_max_mode: false,
-      is_mumble: false,
-      create_mode: 'custom',
-      user_tier: '',
-      create_session_token: randomUUID(),
-      disable_volume_normalization: false,
-      ...(Object.keys(sliders).length ? {
-        can_control_sliders: ['weirdness_constraint', 'style_weight'],
-        control_sliders: sliders,
-      } : {}),
-      ...(input.vocalGender ? {
-        vocal_gender: input.vocalGender === 'female' ? 'f' : 'm',
-      } : {}),
+      web_client_pathname: '/create', is_max_mode: false, is_mumble: false, create_mode: 'custom', user_tier: '',
+      create_session_token: randomUUID(), disable_volume_normalization: false,
+      ...(Object.keys(sliders).length ? { can_control_sliders: ['weirdness_constraint', 'style_weight'], control_sliders: sliders } : {}),
+      ...(input.vocalGender ? { vocal_gender: input.vocalGender === 'female' ? 'f' : 'm' } : {}),
     },
-    override_fields: [],
-    cover_clip_id: null,
-    cover_start_s: null,
-    cover_end_s: null,
-    persona_id: null,
-    artist_clip_id: null,
-    artist_start_s: null,
-    artist_end_s: null,
-    continue_clip_id: null,
-    continued_aligned_prompt: null,
-    continue_at: null,
+    override_fields: [], cover_clip_id: null, cover_start_s: null, cover_end_s: null,
+    persona_id: null, artist_clip_id: null, artist_start_s: null, artist_end_s: null,
+    continue_clip_id: null, continued_aligned_prompt: null, continue_at: null,
     transaction_uuid: randomUUID(),
   };
 }
@@ -644,29 +494,16 @@ function buildOriginalPayload(input, verification = {}) {
 async function postOriginal(slot, input, headers, verification = {}) {
   const ses = session.fromPartition(partitionFor(slot));
   const res = await ses.fetch(`${SUNO_API}/api/generate/v2-web/`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(buildOriginalPayload(input, verification)),
+    method: 'POST', headers, body: JSON.stringify(buildOriginalPayload(input, verification)),
   });
   const body = await res.json().catch(() => null);
-  const detail = typeof body?.detail === 'string'
-    ? body.detail
-    : JSON.stringify(body?.detail ?? body);
-
+  const detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail ?? body);
   if (!res.ok) {
-    if (res.status === 402 || /enough credits|out of credits|out of songs|buy more/i.test(detail || '')) {
-      throw new Error('Suno 账号歌曲额度不足');
-    }
-    if (res.status === 422 && /verify|verification|captcha|人机验证/i.test(detail || '')) {
-      return { verificationRequired: true, status: res.status, detail };
-    }
+    if (res.status === 402 || /enough credits|out of credits|out of songs|buy more/i.test(detail || '')) throw new Error('Suno 账号歌曲额度不足');
+    if (res.status === 422 && /verify|verification|captcha|人机验证/i.test(detail || '')) return { verificationRequired: true, status: res.status, detail };
     throw new Error(`Suno 原创提交失败（${res.status}）：${detail || '未知错误'}`);
   }
-
-  if (String(body?.status || '').toLowerCase() === 'error') {
-    throw new Error('Suno 接口拒绝了本次原创提交');
-  }
-
+  if (String(body?.status || '').toLowerCase() === 'error') throw new Error('Suno 接口拒绝了本次原创提交');
   const clips = (body?.clips || []).map(x => x?.id).filter(Boolean).slice(0, 2);
   if (!clips.length) throw new Error('Suno 没有返回原创作品编号');
   return { verificationRequired: false, clips };
@@ -682,29 +519,17 @@ async function submitOriginal(input) {
   const headers = await apiHeaders(slot);
   let verification = {};
   const precheck = await precheckVerification(slot, headers);
-
-  if (precheck.known && precheck.required) {
-    verification = await runOfficialVerification(slot, precheck.captchaProvider, title);
-  }
-
+  if (precheck.known && precheck.required) verification = await runOfficialVerification(slot, precheck.captchaProvider, title);
   let result = await postOriginal(slot, input, headers, verification);
-
   if (result.verificationRequired) {
     const provider = await detectCaptchaProvider(slot, headers);
     verification = await runOfficialVerification(slot, provider, title);
     result = await postOriginal(slot, input, headers, verification);
   }
-
-  if (result.verificationRequired) {
-    throw new Error('Suno 在完成官方验证后仍要求再次验证，已停止当前任务，避免重复提交。');
-  }
-
+  if (result.verificationRequired) throw new Error('Suno 在完成官方验证后仍要求再次验证，已停止当前任务，避免重复提交。');
   const clips = result.clips;
   return {
-    slot,
-    title,
-    clipIds: clips,
-    submittedAt: new Date().toISOString(),
+    slot, title, clipIds: clips, submittedAt: new Date().toISOString(),
     tracks: clips.map(id => ({ id, url: `https://suno.com/song/${id}`, status: 'submitted' })),
   };
 }
@@ -713,7 +538,7 @@ async function refreshTask(task) {
   const slot = String(task?.slot || '1');
   const ids = Array.isArray(task?.clipIds) ? task.clipIds.filter(Boolean) : [];
   if (!ids.length) throw new Error('任务没有作品编号');
-  const headers = await apiHeaders(slot);
+  const headers = await apiHeaders(slot, { json: false });
   const ses = session.fromPartition(partitionFor(slot));
   const url = `${SUNO_API}/api/feed/v2?ids=${encodeURIComponent(ids.join(','))}`;
   const res = await ses.fetch(url, { headers });
@@ -724,14 +549,9 @@ async function refreshTask(task) {
   const tracks = ids.map(id => {
     const x = byId.get(id) || {};
     return {
-      id,
-      url: `https://suno.com/song/${id}`,
-      status: String(x.status || 'submitted'),
-      title: x.title || task.title || '',
-      audioUrl: x.audio_url || '',
-      imageUrl: x.image_url || '',
-      duration: Number(x.metadata?.duration || 0),
-      error: x.error_message || x.metadata?.error_message || '',
+      id, url: `https://suno.com/song/${id}`, status: String(x.status || 'submitted'),
+      title: x.title || task.title || '', audioUrl: x.audio_url || '', imageUrl: x.image_url || '',
+      duration: Number(x.metadata?.duration || 0), error: x.error_message || x.metadata?.error_message || '',
     };
   });
   return { ...task, tracks, refreshedAt: new Date().toISOString() };
@@ -743,7 +563,7 @@ function createMainWindow() {
     height: 820,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Suno Original Studio v0.5.4',
+    title: 'Suno Original Studio v0.5.6',
     backgroundColor: '#0b0c10',
     autoHideMenuBar: true,
     webPreferences: {
