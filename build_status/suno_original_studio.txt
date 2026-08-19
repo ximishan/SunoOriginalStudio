@@ -1,8 +1,8 @@
 status=started
-run_id=32235659948
+run_id=32235821787
 artifact=SunoOriginalStudio_v0.5.2_Windows
 exe=SunoOriginalStudio_v0.5.2.exe
-source_sha=d4ca48f187d405afaeed2bc3a3f6fb5e0bbe2abc
+source_sha=a4ea2d4618aa4d5428ca5fdda059b77a2fbb4837
 exact_n19_toolchain=true
 song_library=true
 suno_wav_pipeline=true
