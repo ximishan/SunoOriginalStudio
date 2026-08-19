@@ -1,0 +1,60 @@
+>下载完成后自动 AVR N19</label>
+            <button id="libraryAutomationNow" class="secondary">立即运行一次</button>
+          </div>
+          <div id="libraryAutomationStatus" class="small" style="margin-top:8px">正在读取后台自动化状态……</div>
+        </div>
+        <label>歌曲保存目录</label>''',
+    'automation UI',
+    'id="libraryAutoDownload"',
+)
+
+# package.json.
+pkg_path = Path('package.json')
+pkg = json.loads(pkg_path.read_text(encoding='utf-8'))
+pkg_dirty = False
+if pkg.get('version') != '0.5.6':
+    pkg['version'] = '0.5.6'; pkg_dirty = True
+desc = 'Suno original-song desktop tool with unified Clerk auth, background polling, automatic WAV/lyrics saving, optional exact AVR N19 processing, and a persistent song library'
+if pkg.get('description') != desc:
+    pkg['description'] = desc; pkg_dirty = True
+files = pkg.setdefault('build', {}).setdefault('files', [])
+if 'suno_session.js' not in files:
+    files.insert(2, 'suno_session.js'); pkg_dirty = True
+win = pkg['build'].setdefault('win', {})
+if win.get('artifactName') != 'SunoOriginalStudio_v0.5.6.exe':
+    win['artifactName'] = 'SunoOriginalStudio_v0.5.6.exe'; pkg_dirty = True
+if pkg_dirty:
+    write('package.json', json.dumps(pkg, ensure_ascii=False, indent=2) + '\n')
+
+# README.
+text = read('README.md')
+new = text.replace('## 当前版本：v0.5.4', '## 当前版本：v0.5.6')
+if '- 统一 Suno Session / Auth Token：原创、状态查询、歌曲列表、WAV 下载共用同一 Clerk token 获取逻辑' not in new:
+    new = new.replace('当前已经包含：\n', '''当前已经包含：
+
+- 统一 Suno Session / Auth Token：原创、状态查询、歌曲列表、WAV 下载共用同一 Clerk token 获取逻辑
+- 后台自动轮询未完成歌曲，程序重启后自动恢复
+- 可选“生成完成后自动下载 WAV + 保存歌词”
+- 可选“下载完成后自动 AVR N19”，并保留防重复处理
+''', 1)
+for row in [
+    '- 后台自动轮询 Suno 生成状态\n',
+    '- 生成完成后自动下载 WAV\n',
+    '- 生成完成后自动保存歌词 + WAV\n',
+    '- 下载完成后可选自动 N19\n',
+]:
+    new = new.replace(row, '')
+new = re.sub(r'### v0\.5\.5：[\s\S]*?### v0\.6\.0：Excel 批量原创 \+ 3 账号调度', '### v0.6.0：Excel 批量原创 + 3 账号调度', new, count=1)
+if 'V0.5.6_AUTOMATION_PIPELINE.md' not in new:
+    new = new.replace('- `V0.5.4_SONG_PLAYER.md`：歌曲列表试听播放器\n', '- `V0.5.4_SONG_PLAYER.md`：歌曲列表试听播放器\n- `V0.5.6_AUTOMATION_PIPELINE.md`：统一 Session/Auth 与自动轮询/下载/N19\n')
+if new != text:
+    write('README.md', new)
+
+# Main project status.
+text = read('PROJECT_STATUS_AND_AVR_FEATURES.md')
+new = text.replace('当前功能基线：**v0.5.4**', '当前功能基线：**v0.5.6**')
+for old, done in [
+    ('| 后台自动轮询生成完成 | ⬜ |', '| 后台自动轮询生成完成 | ✅ |'),
+    ('| 程序启动后自动恢复轮询 | ⬜ |', '| 程序启动后自动恢复轮询 | ✅ |'),
+    ('| 生成完成后自动下载 Suno WAV | ⬜ |', '| 生成完成后自动下载 Suno WAV | ✅ |'),
+    ('| 生成完成后自动保存歌词 + WAV | ⬜ |', '| 
