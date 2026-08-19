@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('demoApi', {
+  profileInfo: () => ipcRenderer.invoke('app:profile-info'),
   accountStatus: (slot) => ipcRenderer.invoke('account:status', slot),
   openLogin: (slot) => ipcRenderer.invoke('account:open-login', slot),
   submitOriginal: (payload) => ipcRenderer.invoke('original:submit', payload),

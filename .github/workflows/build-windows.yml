@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - song-library-v0.5.0
+      - fix-login-persistence-v0.5.1
     paths:
       - 'bootstrap.js'
       - 'main.js'
@@ -18,6 +18,9 @@ on:
       - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
       - 'THIRD_PARTY_N19.md'
       - 'V0.5_SONG_LIBRARY.md'
+      - 'PROFILE_PERSISTENCE.md'
+      - 'BUGFIX_PLAN_v0.5.1.md'
+      - 'PROFILE_MIGRATION_NOTES.md'
       - '.github/workflows/build-windows.yml'
 
 permissions:
@@ -37,17 +40,18 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.0_Windows
-          exe=SunoOriginalStudio_v0.5.0.exe
+          artifact=SunoOriginalStudio_v0.5.1_Windows
+          exe=SunoOriginalStudio_v0.5.1.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
           suno_wav_pipeline=true
+          stable_session_profile=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build_status/suno_original_studio.txt
-          git commit -m "Start SunoOriginalStudio v0.5.0 build ${{ github.run_id }}" || exit 0
+          git commit -m "Start SunoOriginalStudio v0.5.1 build ${{ github.run_id }}" || exit 0
           git push
 
       - name: Setup Node
@@ -128,7 +132,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.0.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.1.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -148,23 +152,23 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.0_Windows
-          path: dist/SunoOriginalStudio_v0.5.0.exe
+          name: SunoOriginalStudio_v0.5.1_Windows
+          path: dist/SunoOriginalStudio_v0.5.1.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.0
-          name: Suno Original Studio v0.5.0
+          tag_name: suno-original-studio-v0.5.1
+          name: Suno Original Studio v0.5.1
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.5.0.exe
+          files: dist/SunoOriginalStudio_v0.5.1.exe
           body: |
-            Adds a persistent song list for every submitted Suno clip.
-            Tracks generation, WAV download, exact AVR N19 processing and local-save status.
-            Completed songs can be selected directly from the song list; the app requests the Suno WAV, saves lyrics and source WAV into a per-song directory, then runs the exact AVR 1.77.0 N19 chain and saves the processed WAV.
+            Fixes Suno login persistence across portable EXE upgrades.
+            Pins userData/sessionData to %APPDATA%/SunoOriginalStudio and migrates legacy persistent partitions plus Chromium Local State before any session is created.
+            Preserves the v0.5 song library, Suno WAV workflow and exact AVR 1.77.0 N19 processing chain.
 
       - name: Report successful build
         shell: pwsh
@@ -173,13 +177,14 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.0_Windows
-          exe=SunoOriginalStudio_v0.5.0.exe
+          artifact=SunoOriginalStudio_v0.5.1_Windows
+          exe=SunoOriginalStudio_v0.5.1.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
           suno_wav_pipeline=true
+          stable_session_profile=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git add build_status/suno_original_studio.txt
-          git commit -m "Finish SunoOriginalStudio v0.5.0 build ${{ github.run_id }}" || exit 0
+          git commit -m "Finish SunoOriginalStudio v0.5.1 build ${{ github.run_id }}" || exit 0
           git push
