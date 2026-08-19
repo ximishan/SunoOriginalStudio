@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Suno 原创 Demo</title>
+  <title>Suno Original Studio</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, "Microsoft YaHei", sans-serif; }
     body { margin:0; background:#0b0c10; color:#f5f7fb; }
@@ -39,8 +39,8 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Suno 原创 Demo v0.1.0</h1>
-    <div class="sub">自定义歌词 + 3 个独立 Suno 登录槽位。Demo 只做原创提交和状态查看，不包含 AVR 授权、公告、母带等功能。</div>
+    <h1>Suno Original Studio v0.2.0</h1>
+    <div class="sub">自定义歌词 + 3 个独立 Suno 登录槽位。当前版本重点接入 Suno 官方 hCaptcha / Turnstile 验证流程，并在验证完成后自动续提原创任务。</div>
     <div class="grid">
       <div>
         <div class="card">
@@ -71,7 +71,7 @@
         </div>
         <div class="row">
           <div><label>Weirdness</label><input id="weirdness" type="number" min="0" max="100" value="50" /></div>
-          <div><label>&nbsp;</label><div class="small" style="padding-top:10px">Demo 不自动处理验证码；Suno 要求验证时会打开账号窗口，由你手动完成。</div></div>
+          <div><label>&nbsp;</label><div class="small" style="padding-top:10px">Suno 要求验证时会打开对应账号的官方验证组件；挑战本身由 Suno / Cloudflare / hCaptcha 完成，程序只负责衔接与续提。</div></div>
         </div>
         <div class="actions">
           <button id="submitBtn">提交原创</button>
