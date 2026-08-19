@@ -89,6 +89,7 @@ $('submitBtn').onclick = async () => {
     title: $('title').value,
     lyrics: $('lyrics').value,
     stylePrompt: $('style').value,
+    negativeStyle: $('negativeStyle').value,
     slot: $('slot').value,
     modelVersion: $('model').value,
     vocalGender: $('gender').value,

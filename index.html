@@ -62,7 +62,7 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Suno Original Studio v0.5.0</h1>
+    <h1>Suno Original Studio v0.5.2</h1>
     <div class="sub">原创歌曲 + 持久化歌曲列表 + Suno WAV 下载 + 歌曲列表直接 AVR N19 AI 消痕。</div>
 
     <div class="tabs">
@@ -95,6 +95,9 @@
           <textarea id="lyrics" placeholder="把完整歌词直接粘贴到这里……"></textarea>
           <label>风格提示词</label>
           <input id="style" placeholder="例如：sad piano pop, intimate female vocal, cinematic, slow tempo" />
+          <label>排除风格</label>
+          <input id="negativeStyle" placeholder="例如：rap, trap, metal, spoken word, choir" />
+          <div class="small" style="margin-top:6px">填写不希望 Suno 使用的风格、元素或演唱方式，会作为 negative_tags 单独提交。</div>
           <div class="row3">
             <div><label>模型</label><select id="model"><option>v5.5</option><option>v5</option><option>v4.5+</option><option>v4.5-all</option></select></div>
             <div><label>人声</label><select id="gender"><option value="">不指定</option><option value="female">女声</option><option value="male">男声</option></select></div>
