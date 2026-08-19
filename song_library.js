@@ -112,6 +112,7 @@ function saveSubmission(app, payload = {}) {
       title: String(task.title || input.title || '').trim() || '未命名',
       lyrics: String(input.lyrics || ''),
       stylePrompt: String(input.stylePrompt || ''),
+      negativeStyle: String(input.negativeStyle || ''),
       slot: String(task.slot || input.slot || '1'),
       modelVersion: String(input.modelVersion || ''),
       vocalGender: String(input.vocalGender || ''),
