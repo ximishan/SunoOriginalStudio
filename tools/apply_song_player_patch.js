@@ -54,8 +54,8 @@ if (patchFile('renderer.js', [
   },
   {
     label: 'row play button',
-    from: `      <td><div class="inline-actions"><button class="secondary" data-open-suno="${escapeHtml(song.clipId)}">Suno</button>${song.localDir ? `<button class="secondary" data-open-local="${escapeHtml(song.clipId)}">本地</button>` : ''}</div></td>`,
-    to: `      <td><div class="inline-actions"><button class="secondary" data-play-song="${escapeHtml(song.clipId)}" ${isSongComplete(song) || song.audioUrl || song.sourceWavPath || song.processedWavPath ? '' : 'disabled'}>试听</button><button class="secondary" data-open-suno="${escapeHtml(song.clipId)}">Suno</button>${song.localDir ? `<button class="secondary" data-open-local="${escapeHtml(song.clipId)}">本地</button>` : ''}</div></td>`,
+    from: "      <td><div class=\"inline-actions\"><button class=\"secondary\" data-open-suno=\"${escapeHtml(song.clipId)}\">Suno</button>${song.localDir ? `<button class=\"secondary\" data-open-local=\"${escapeHtml(song.clipId)}\">本地</button>` : ''}</div></td>",
+    to: "      <td><div class=\"inline-actions\"><button class=\"secondary\" data-play-song=\"${escapeHtml(song.clipId)}\" ${isSongComplete(song) || song.audioUrl || song.sourceWavPath || song.processedWavPath ? '' : 'disabled'}>试听</button><button class=\"secondary\" data-open-suno=\"${escapeHtml(song.clipId)}\">Suno</button>${song.localDir ? `<button class=\"secondary\" data-open-local=\"${escapeHtml(song.clipId)}\">本地</button>` : ''}</div></td>",
   },
   {
     label: 'bind play buttons',
