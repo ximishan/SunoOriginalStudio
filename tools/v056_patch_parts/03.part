@@ -1,0 +1,130 @@
+'''function updateSong(app, clipId, patch, sender) {
+  const state = readState(app);
+  const song = state.songs.find(x => x.clipId === clipId);
+  if (!song) return null;
+  Object.assign(song, patch, { updatedAt: new Date().toISOString() });
+  writeState(app, state);
+  emit(sender, { type: 'song-updated', song });
+  return song;
+}
+
+async function processSelectedSongs'''
+helpers_replacement = '''function updateSong(app, clipId, patch, sender) {
+  const state = readState(app);
+  const song = state.songs.find(x => x.clipId === clipId);
+  if (!song) return null;
+  Object.assign(song, patch, { updatedAt: new Date().toISOString() });
+  writeState(app, state);
+  emit(sender, { type: 'song-updated', song });
+  return song;
+}
+
+function fileReady(file) {
+  try { return Boolean(file && fs.existsSync(file) && fs.statSync(file).size > 0); } catch { return false; }
+}
+
+function pathsForSong(app, song) {
+  const state = readState(app);
+  const rootDir = state.rootDir || defaultRoot(app);
+  const dir = song.localDir || songDir(rootDir, song);
+  return {
+    rootDir,
+    dir,
+    lyricsPath: song.lyricsPath || path.join(dir, '歌词.txt'),
+    sourceWavPath: song.sourceWavPath || path.join(dir, `${safeName(song.title)}-Suno原始.wav`),
+    processedWavPath: song.processedWavPath || path.join(dir, `${safeName(song.title)}-消痕-N19.wav`),
+  };
+}
+
+async function ensureSongDownloaded(app, song, sender) {
+  const paths = pathsForSong(app, song);
+  fs.mkdirSync(paths.dir, { recursive: true });
+  if (!fileReady(paths.lyricsPath)) fs.writeFileSync(paths.lyricsPath, String(song.lyrics || ''), 'utf8');
+
+  if (fileReady(paths.sourceWavPath)) {
+    return updateSong(app, song.clipId, {
+      localDir: paths.dir,
+      lyricsPath: paths.lyricsPath,
+      sourceWavPath: paths.sourceWavPath,
+      wavStatus: 'downloaded',
+      localStatus: 'saved',
+      lastError: '',
+    }, sender) || song;
+  }
+
+  updateSong(app, song.clipId, {
+    localDir: paths.dir,
+    lyricsPath: paths.lyricsPath,
+    wavStatus: 'downloading',
+    localStatus: 'saving',
+    lastError: '',
+  }, sender);
+  const wavUrl = await requestWavUrl(song.slot, song.clipId, sender);
+  await downloadToFile(song.slot, wavUrl, paths.sourceWavPath);
+  return updateSong(app, song.clipId, {
+    wavUrl,
+    localDir: paths.dir,
+    lyricsPath: paths.lyricsPath,
+    sourceWavPath: paths.sourceWavPath,
+    wavStatus: 'downloaded',
+    localStatus: 'saved',
+    lastError: '',
+  }, sender) || song;
+}
+
+async function ensureSongN19(app, song, sender) {
+  song = readState(app).songs.find(x => x.clipId === song.clipId) || song;
+  if (String(song.deaiStatus || '').toLowerCase() === 'complete' && fileReady(song.processedWavPath)) return song;
+  if (String(song.deaiStatus || '').toLowerCase() === 'processing') return song;
+  song = await ensureSongDownloaded(app, song, sender);
+  const paths = pathsForSong(app, song);
+  if (fileReady(paths.processedWavPath)) {
+    return updateSong(app, song.clipId, {
+      processedWavPath: paths.processedWavPath,
+      deaiStatus: 'complete',
+      localStatus: 'saved',
+      lastError: '',
+    }, sender) || song;
+  }
+  updateSong(app, song.clipId, { deaiStatus: 'processing', localStatus: 'saving', lastError: '' }, sender);
+  await processExactN19(app, paths.sourceWavPath, paths.processedWavPath, sender, song);
+  return updateSong(app, song.clipId, {
+    processedWavPath: paths.processedWavPath,
+    deaiStatus: 'complete',
+    localStatus: 'saved',
+    lastError: '',
+  }, sender) || song;
+}
+
+function isComplete(song) {
+  return /^(complete|completed)$/i.test(String(song.generationStatus || ''));
+}
+
+function isTerminalGenerationError(song) {
+  return /^(error|failed)$/i.test(String(song.generationStatus || ''));
+}
+
+async function refreshPendingLibrary(app) {
+  const state = readState(app);
+  const groups = new Map();
+  for (const song of state.songs) {
+    if (isComplete(song) || isTerminalGenerationError(song)) continue;
+    if (!groups.has(song.slot)) groups.set(song.slot, []);
+    groups.get(song.slot).push(song);
+  }
+  for (const [slot, songs] of groups.entries()) {
+    try {
+      await refreshSlotSongs(slot, songs);
+    } catch (e) {
+      const error = String(e?.message || e);
+      for (const song of songs) song.lastError = error;
+    }
+  }
+  writeState(app, state);
+  emit(null, { type: 'library-refreshed', automation: state.automation });
+  return state;
+}
+
+function retryReady(clipId) {
+  const state = automationRetry.get(clipId);
+  return !state || Date.now() >= state.n
