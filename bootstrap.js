@@ -1,7 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const { app, ipcMain, dialog, shell, BrowserWindow, session } = require('electron');
-const { partitionFor, flushAccountSession, flushAllAccountSessions, getAccountStatus, destroyAuthWindows } = require('./suno_session');
+const {
+  partitionFor,
+  flushAccountSession,
+  flushAllAccountSessions,
+  getAccountStatus,
+  probeUnknownAccount,
+  noteSessionCookie,
+  destroyAuthWindows,
+} = require('./suno_session');
 
 const ACCOUNT_SLOTS = ['1', '2', '3'];
 
@@ -71,7 +79,17 @@ const flushTimers = new Map();
 const accountStateTimers = new Map();
 const lastKnownLoginState = new Map();
 
-function emitAccountStateChanged(slot) {
+function sendAccountState(state) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (!win.isDestroyed() && win.webContents.getURL().startsWith('file://')) {
+        win.webContents.send('account:state-changed', state);
+      }
+    } catch {}
+  }
+}
+
+function emitAccountStateChanged(slot, delay = 180) {
   slot = String(slot);
   const old = accountStateTimers.get(slot);
   if (old) clearTimeout(old);
@@ -82,32 +100,20 @@ function emitAccountStateChanged(slot) {
     try { state = await getAccountStatus(slot); } catch { return; }
 
     const previous = lastKnownLoginState.get(slot);
-    lastKnownLoginState.set(slot, Boolean(state.loggedIn));
-
-    // Cookie/Clerk 初始化会产生很多 changed 事件。只有真正的登录状态
-    // 发生变化时才通知 renderer，避免多个 refreshAccounts() 交叉执行，
-    // 导致账号 1/2/3 在界面上重复追加。
-    if (previous === undefined || previous === Boolean(state.loggedIn)) return;
-
-    for (const win of BrowserWindow.getAllWindows()) {
-      try {
-        if (!win.isDestroyed() && win.webContents.getURL().startsWith('file://')) {
-          win.webContents.send('account:state-changed', state);
-        }
-      } catch {}
-    }
-  }, 1200);
+    const current = Boolean(state.loggedIn);
+    lastKnownLoginState.set(slot, current);
+    if (previous === undefined || previous !== current) sendAccountState(state);
+  }, delay);
 
   accountStateTimers.set(slot, timer);
 }
 
-function scheduleAccountFlush(slot, delay = 700) {
+function scheduleAccountFlush(slot, delay = 450) {
   const old = flushTimers.get(slot);
   if (old) clearTimeout(old);
   const timer = setTimeout(() => {
     flushTimers.delete(slot);
     flushAccountSession(slot).catch(() => {});
-    emitAccountStateChanged(slot);
   }, delay);
   flushTimers.set(slot, timer);
 }
@@ -115,27 +121,34 @@ function scheduleAccountFlush(slot, delay = 700) {
 function installAccountPersistence() {
   for (const slot of ACCOUNT_SLOTS) {
     const ses = session.fromPartition(partitionFor(slot));
-    ses.cookies.on('changed', (_event, cookie) => {
+    ses.cookies.on('changed', (_event, cookie, _cause, removed) => {
       const name = String(cookie?.name || '');
       const domain = String(cookie?.domain || '').toLowerCase();
-      if (domain.includes('suno.com') || domain.includes('clerk') || /^__(session|client|clerk)/i.test(name)) {
-        scheduleAccountFlush(slot);
-      }
+      const relevant = domain.includes('suno.com') || domain.includes('clerk') || /^__(session|client|clerk)/i.test(name);
+      if (!relevant) return;
+
+      const becameLoggedIn = noteSessionCookie(slot, cookie, Boolean(removed));
+      scheduleAccountFlush(slot, becameLoggedIn ? 120 : 450);
+      emitAccountStateChanged(slot, becameLoggedIn ? 80 : 300);
     });
   }
+
   const timer = setInterval(() => flushAllAccountSessions().catch(() => {}), 20000);
   if (typeof timer.unref === 'function') timer.unref();
 }
 
-async function robustAccountStatus(slot) {
-  const state = await getAccountStatus(slot);
-  lastKnownLoginState.set(String(slot), Boolean(state.loggedIn));
-  return {
-    ...state,
-    windowOpen: false,
-    verificationActive: false,
-    stableProfile: app.getPath('userData'),
-  };
+async function warmUnknownAccountStates() {
+  // UI 不等待这里。只用于从旧版 profile 一次性恢复长期 Clerk 登录状态。
+  for (const slot of ACCOUNT_SLOTS) {
+    try {
+      const before = await getAccountStatus(slot);
+      lastKnownLoginState.set(slot, Boolean(before.loggedIn));
+      const after = await probeUnknownAccount(slot);
+      const changed = Boolean(before.loggedIn) !== Boolean(after.loggedIn);
+      lastKnownLoginState.set(slot, Boolean(after.loggedIn));
+      if (changed) sendAccountState(after);
+    } catch {}
+  }
 }
 
 const profileInfo = prepareStableProfile();
@@ -150,8 +163,8 @@ app.whenReady().then(() => {
   registerSongLibraryIpc({ app, ipcMain, dialog, shell });
   startSongLibraryAutomation(app);
 
-  ipcMain.removeHandler('account:status');
-  ipcMain.handle('account:status', async (_event, slot) => robustAccountStatus(slot));
+  // account:status 保留 main.js 注册的处理器：它会附带当前可见登录窗口和验证码状态。
+  // suno_session.getAccountStatus 本身已经是纯本地快速查询，不再需要 bootstrap 覆盖 handler。
 
   ipcMain.handle('app:profile-info', async () => ({
     userData: app.getPath('userData'),
@@ -160,6 +173,7 @@ app.whenReady().then(() => {
   }));
 
   flushAllAccountSessions().catch(() => {});
+  setTimeout(() => warmUnknownAccountStates().catch(() => {}), 1800);
 });
 
 let quitFlushStarted = false;
@@ -176,6 +190,8 @@ app.on('before-quit', event => {
   destroyAuthWindows();
   for (const timer of accountStateTimers.values()) clearTimeout(timer);
   accountStateTimers.clear();
+  for (const timer of flushTimers.values()) clearTimeout(timer);
+  flushTimers.clear();
   flushAllAccountSessions()
     .finally(() => {
       quitFlushDone = true;
