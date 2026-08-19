@@ -1,23 +1,21 @@
 # SunoOriginalStudio
 
-独立的 Suno 原创歌曲桌面工具实验项目。
+独立的 Suno 原创歌曲 Windows 桌面工具。
 
-## 当前版本
+## 当前版本：v0.3.0
 
-当前开发版本：`v0.2.0`
-
-当前功能：
+当前已包含：
 
 - 3 个独立、持久化的 Suno 账号 Session
 - 自定义歌名、完整歌词、风格提示词
-- 原创歌曲提交
-- 任务状态刷新
-- 检测 Suno 人机验证要求
-- 根据 `captcha_version` 衔接 Suno 官方 hCaptcha / Cloudflare Turnstile 组件
-- 用户完成官方挑战后获取验证 token
-- 自动把 `token` / `token_provider` 带回原原创请求继续提交
-- 验证组件错误自动重试，支持手动重新加载和取消
+- 原创歌曲提交与任务状态查询
+- Suno 官方 hCaptcha / Cloudflare Turnstile 验证衔接
+- 验证完成后自动续提原创任务
+- 集成 N19 AI 消痕页面
+- 内置 FFmpeg，无需用户额外安装
+- AI 消痕支持多文件批处理、自定义输出目录、取消、处理日志
+- 输出 48kHz / 16-bit / Stereo WAV
 
-> 本项目不破解、识别或绕过验证码，只在用户自己的 Suno 登录 Session 中衔接官方验证流程。
+项目完整规划和 AVR 功能对照见：`PROJECT_STATUS_AND_AVR_FEATURES.md`。
 
-详细开发状态和 AVR 功能对照见 `PROJECT_STATUS_AND_AVR_FEATURES.md`。
+> 人机验证只衔接 Suno 官方验证流程，不做验证码破解、识别、代答或绕过。
