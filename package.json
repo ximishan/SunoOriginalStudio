@@ -1,6 +1,6 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Suno original-song desktop tool with unified Clerk auth, background polling, automatic WAV and lyrics saving, optional exact AVR N19 processing, and a persistent song library",
   "main": "bootstrap.js",
   "author": "",
@@ -38,7 +38,7 @@
     ],
     "win": {
       "target": [{"target":"portable","arch":["x64"]}],
-      "artifactName": "SunoOriginalStudio_v0.5.6.exe"
+      "artifactName": "SunoOriginalStudio_v0.5.7.exe"
     }
   }
 }
