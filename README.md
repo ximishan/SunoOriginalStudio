@@ -2,15 +2,20 @@
 
 独立的 Suno 原创歌曲 Windows 桌面工具。
 
-## 当前版本：v0.5.6
+## 当前版本：v0.5.7
 
 当前已经包含：
 
-- 3 个独立、持久化的 Suno 账号 Session
+- 3 个固定账号位、独立持久化的 Suno 账号 Session
 - 固定用户数据目录 `%APPDATA%\SunoOriginalStudio`
 - 旧版本账号 Session / `Local State` 迁移
+- **v0.5.7 账号认证稳定性修复**：账号状态查询改为本地快速判断，不再为了刷新绿点启动隐藏 Suno 页面
+- 登录产生 `__session` 后立即确认该槽位已登录，并保存可靠登录状态到 `suno-account-login-state-v1.json`
+- `__client` 不再单独代表登录成功，避免空账号位误判为已登录
+- 短期 `__session` 过期后不会立刻把已经确认登录的账号显示成未登录
+- 旧版本长期 Clerk Session 只在后台做一次恢复探测，不阻塞账号区显示
 - **统一 Suno Session / Auth Token**：原创提交、任务刷新、歌曲列表、WAV 下载共用 `suno_session.js`
-- 不再要求短生命周期 `__session` 必须预先存在；优先恢复 Clerk Session 并获取新 token
+- 真正提交歌曲 / 下载 WAV 时才通过 Clerk Session 获取或刷新 token
 - Clerk 登录状态增强识别与 Cookie/Storage 主动落盘
 - 自定义歌名、完整歌词、风格提示词
 - 独立“排除风格”，通过 `negative_tags` 提交
@@ -67,7 +72,7 @@
 - `V0.5.2_NEGATIVE_STYLE.md`：排除风格
 - `V0.5.3_NO_REPEAT_DEAI.md`：已消痕歌曲防重复处理
 - `V0.5.4_SONG_PLAYER.md`：歌曲列表试听播放器
-- `V0.5.6_AUTOMATION_PIPELINE.md`：统一 Session/Auth 与自动轮询/下载/N19
+- `V0.5.6_AUTOMATION_PIPELINE.md`：统一 Session/Auth 与自动轮询/下载/N19 的实现历史
 - `PROFILE_PERSISTENCE.md`：账号 Profile / Session 持久化
 - `THIRD_PARTY_N19.md`：N19 工具链、哈希、阶段与第三方说明
 
