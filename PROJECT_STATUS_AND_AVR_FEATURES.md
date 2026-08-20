@@ -2,7 +2,7 @@
 
 > 这是项目主状态文档。以后每次增加功能、修 Bug、改开发优先级，都同步更新这里。
 >
-> 当前功能基线：**v0.5.6**  
+> 当前功能基线：**v0.5.7**  
 > 仓库：`ximishan/SunoOriginalStudio`
 
 ---
@@ -30,16 +30,23 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 # 二、版本总览
 
-## v0.5.6 已完成
+## v0.5.7 已完成
 
 | 功能 | 状态 | 当前实现 |
 |---|---|---|
-| 3 个独立 Suno 账号 | ✅ | `persist:suno-original-demo-1/2/3` |
+| 3 个固定 Suno 账号位 | ✅ | 账号 1 / 2 / 3 始终固定显示 |
+| 3 个独立 Suno Session | ✅ | `persist:suno-original-demo-1/2/3` |
 | 固定用户数据目录 | ✅ | `%APPDATA%\SunoOriginalStudio` |
 | 旧登录数据迁移 | ✅ | persistent partitions + `Local State` |
 | Session 主动落盘 | ✅ | Cookie/Storage flush |
 | 统一 Suno Session/Auth | ✅ | `suno_session.js` |
-| 短期 `__session` 过期后恢复 | ✅ | 优先恢复 `window.Clerk.session` 并 `getToken()` |
+| 账号状态本地快速判断 | ✅ | 刷新绿点不再加载隐藏 Suno 页面 |
+| 登录成功即时识别 | ✅ | `__session` 出现后立即标记对应槽位已登录 |
+| 可靠登录状态持久化 | ✅ | `suno-account-login-state-v1.json` |
+| 防空槽位误判登录 | ✅ | `__client` 不再单独代表登录成功 |
+| 短期 `__session` 过期后状态保持 | ✅ | 使用已确认登录状态，不立即误判未登录 |
+| 旧长期 Clerk Session 后台恢复 | ✅ | 仅后台一次性 probe，不阻塞 UI |
+| API Token 按需恢复 | ✅ | 只在提交/刷新/下载等真实 API 请求时获取新 token |
 | 原创歌曲提交 | ✅ | `/api/generate/v2-web/` |
 | 歌名 / 完整歌词 | ✅ | 自定义 |
 | 风格 / 排除风格 | ✅ | `tags` / `negative_tags` |
@@ -67,9 +74,9 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 ---
 
-# 三、v0.5.6 关键设计
+# 三、v0.5.7 关键设计
 
-## 3.1 统一 Session/Auth
+## 3.1 统一 Session/Auth 与账号状态分层
 
 共享模块：`suno_session.js`
 
@@ -87,12 +94,15 @@ flushAllAccountSessions()
 
 规则：
 
-1. 不再把短期 `__session` 当成“是否登录”的唯一依据。
-2. 对应账号始终使用自己的 persistent partition。
-3. 需要 token 时在该 partition 中恢复 Suno/Clerk。
-4. 优先 `window.Clerk.session.getToken()` 获取当前有效 token。
-5. 只有 Clerk Session 也无法恢复时才认为登录失效。
-6. 原创提交、任务刷新、歌曲列表和 WAV 请求都调用共享 Auth 模块。
+1. 账号 UI 状态和 API Token 获取彻底分开。
+2. 账号状态查询必须是本地快速操作，不为了看绿点重新加载 Suno 页面。
+3. 对应账号始终使用自己的 persistent partition。
+4. 发现该槽位真实 `__session` 后立即确认登录成功并写入可靠状态文件。
+5. `__client` / `__client_uat` 不能单独代表“已登录”，避免空槽位误判。
+6. 短期 `__session` 过期后，不因临时 token 不可见而立刻把已确认账号显示成未登录。
+7. 只有真正需要 API Token 时，才在该 partition 中恢复 Suno/Clerk 并调用 `window.Clerk.session.getToken()`。
+8. 原创提交、任务刷新、歌曲列表和 WAV 请求都调用共享 Auth 模块。
+9. 旧版本长期 Clerk Session 仅在后台做一次恢复探测，不阻塞账号 UI。
 
 ## 3.2 后台歌曲流水线
 
@@ -217,6 +227,16 @@ FFmpeg 节点 9：Rubber Band pitch=0.975 / 48kHz / PCM24
 - 自动下载/N19 幂等与重启恢复
 - 自动失败指数退避
 
+## v0.5.7
+- 将账号认证稳定性修复正式升级为新版本，不再沿用 v0.5.6
+- 三个账号位固定显示，账号状态各自独立更新
+- 账号状态刷新改为本地快速判断，不再启动隐藏 Suno 页面
+- 登录生成 `__session` 后立即确认并持久化登录状态
+- 增加 `suno-account-login-state-v1.json` 可靠状态记录
+- `__client` 不再造成空账号位假登录
+- 旧长期 Clerk Session 后台恢复，不阻塞 UI
+- 18 秒 Clerk 等待仅用于真正 API Token 获取
+
 ---
 
 # 七、维护规则
@@ -225,7 +245,8 @@ FFmpeg 节点 9：Rubber Band pitch=0.975 / 48kHz / PCM24
 2. N19 exact 模式不允许静默降级。
 3. 已 `deaiStatus=complete` 且输出文件有效的歌曲默认不重复 N19。
 4. 所有 Suno API token 获取统一使用 `suno_session.js`。
-5. 自动下载与自动 N19 必须保持幂等。
-6. 批量原创必须先写 checkpoint 再进入下一首，避免重复提交。
-7. Suno Web 私有接口错误必须明确记录，不能静默吞错。
-8. 人机验证只走官方组件，不识别、不绕过、不伪造 token、不第三方代解。
+5. 账号 UI 登录状态不得通过阻塞式 Suno 页面加载来判断。
+6. 自动下载与自动 N19 必须保持幂等。
+7. 批量原创必须先写 checkpoint 再进入下一首，避免重复提交。
+8. Suno Web 私有接口错误必须明确记录，不能静默吞错。
+9. 人机验证只走官方组件，不识别、不绕过、不伪造 token、不第三方代解。
