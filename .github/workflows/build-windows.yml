@@ -13,6 +13,7 @@ on:
       - 'song_library.js'
       - 'preload.js'
       - 'renderer.js'
+      - 'batch_renderer.js'
       - 'index.html'
       - 'package.json'
       - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
@@ -22,6 +23,7 @@ on:
       - 'V0.5.3_NO_REPEAT_DEAI.md'
       - 'V0.5.4_SONG_PLAYER.md'
       - 'V0.5.6_AUTOMATION_PIPELINE.md'
+      - 'BATCH_EXCEL_V0.5.8.md'
       - 'PROFILE_PERSISTENCE.md'
       - '.github/workflows/build-windows.yml'
 
@@ -42,9 +44,11 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.7_Windows
-          exe=SunoOriginalStudio_v0.5.7.exe
+          artifact=SunoOriginalStudio_v0.5.8_Windows
+          exe=SunoOriginalStudio_v0.5.8.exe
           source_sha=${{ github.sha }}
+          excel_batch_submission=true
+          batch_default_interval_seconds=20
           exact_n19_toolchain=true
           song_library=true
           song_player=true
@@ -61,7 +65,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Start SunoOriginalStudio v0.5.7 build ${{ github.run_id }}"
+            git commit -m "Start SunoOriginalStudio v0.5.8 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Build status already current.'
@@ -136,6 +140,7 @@ jobs:
           node --check song_library.js
           node --check preload.js
           node --check renderer.js
+          node --check batch_renderer.js
 
       - name: Build portable EXE
         run: npm run dist
@@ -146,7 +151,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.7.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.8.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -162,23 +167,23 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.7_Windows
-          path: dist/SunoOriginalStudio_v0.5.7.exe
+          name: SunoOriginalStudio_v0.5.8_Windows
+          path: dist/SunoOriginalStudio_v0.5.8.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.7
-          name: Suno Original Studio v0.5.7
+          tag_name: suno-original-studio-v0.5.8
+          name: Suno Original Studio v0.5.8
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.5.7.exe
+          files: dist/SunoOriginalStudio_v0.5.8.exe
           body: |
-            Promotes the authentication/session stability fixes to v0.5.7.
-            Keeps fast local three-slot account status, persistent verified login state, unified Suno Clerk Auth, background polling, automatic WAV + lyrics saving, and optional exact AVR N19 processing.
-            Keeps negative style, no-repeat AI cleaning, song-list playback, and exact AVR 1.77.0 N19 processing.
+            Adds Excel batch original-song submission with one row per song, parameter validation, preview, pause/resume, failed-row retry, local checkpointing, and configurable spacing between submissions (default 20 seconds).
+            Each successful Excel row is saved into the same persistent song library, so the existing background status polling, optional WAV + lyrics auto-download, and optional exact AVR N19 pipeline continue automatically.
+            Keeps the stable three-slot Suno account/session implementation from v0.5.7. Official Suno verification is still handled through Suno's own verification flow.
 
       - name: Report successful build
         shell: pwsh
@@ -187,9 +192,11 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.7_Windows
-          exe=SunoOriginalStudio_v0.5.7.exe
+          artifact=SunoOriginalStudio_v0.5.8_Windows
+          exe=SunoOriginalStudio_v0.5.8.exe
           source_sha=${{ github.sha }}
+          excel_batch_submission=true
+          batch_default_interval_seconds=20
           exact_n19_toolchain=true
           song_library=true
           song_player=true
@@ -204,7 +211,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Finish SunoOriginalStudio v0.5.7 build ${{ github.run_id }}"
+            git commit -m "Finish SunoOriginalStudio v0.5.8 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Success status already current.'
