@@ -2,7 +2,7 @@
 
 > 这是项目主状态文档。以后每次增加功能、修 Bug、改开发优先级，都同步更新这里。
 >
-> 当前功能基线：**v0.5.7**  
+> 当前功能基线：**v0.5.8**  
 > 仓库：`ximishan/SunoOriginalStudio`
 
 ---
@@ -13,16 +13,17 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 1. 使用用户自己的 Suno 账号。
 2. 3 个独立持久化 Suno Session。
-3. 原创歌曲提交。
-4. 自定义歌名、歌词、风格、排除风格、模型、人声和滑杆参数。
-5. Suno 官方 hCaptcha / Cloudflare Turnstile 验证衔接。
-6. 持久化歌曲列表。
-7. 后台自动轮询 Suno 生成状态。
-8. 自动 Suno WAV 下载与歌词保存。
-9. AVR 1.77.0 N19 `SoX + Rubber Band + FFmpeg` 完整链路。
-10. 可选生成完成自动 N19。
-11. 歌曲列表试听。
-12. 后续：Excel 批量原创、3 账号调度、批量 checkpoint、失败重试和结果导出。
+3. 手动原创歌曲提交。
+4. Excel 顺序批量原创。
+5. 自定义歌名、歌词、风格、排除风格、模型、人声和滑杆参数。
+6. Suno 官方 hCaptcha / Cloudflare Turnstile 验证衔接。
+7. 持久化歌曲列表。
+8. 后台自动轮询 Suno 生成状态。
+9. 自动 Suno WAV 下载与歌词保存。
+10. AVR 1.77.0 N19 `SoX + Rubber Band + FFmpeg` 完整链路。
+11. 可选生成完成自动 N19。
+12. 歌曲列表试听。
+13. 后续：3 账号自动调度、账号级 busy 锁、完整后台批量任务中心与结果 Excel 导出。
 
 明确不做：AVR License/激活/设备绑定、消息中心/公告/反馈、AVR 远程配置下发、AVR 自有更新体系、智能母带。
 
@@ -30,10 +31,24 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 # 二、版本总览
 
-## v0.5.7 已完成
+## v0.5.8 已完成
 
 | 功能 | 状态 | 当前实现 |
 |---|---|---|
+| Excel 批量导入 | ✅ | `.xlsx/.xls`，第一张工作表 |
+| Excel 一行一首歌 | ✅ | 每行转换为一个顺序队列任务 |
+| Excel 参数校验/预览 | ✅ | 必填字段、模型、人声、账号校验 |
+| Excel 模板下载 | ✅ | 软件内生成“批量原创 + 填写说明”模板 |
+| Excel 顺序提交队列 | ✅ | 一首完成提交后再进入下一首 |
+| 默认提交间隔 | ✅ | 默认 20 秒，可配置 5-300 秒 |
+| 单行提交间隔覆盖 | ✅ | Excel `提交间隔秒` 优先于全局值 |
+| 批量暂停 / 继续 | ✅ | 当前提交结束后安全暂停 |
+| 失败重试 | ✅ | 失败/中断行可重新放回队列 |
+| 批量本地 checkpoint | ✅ | 主界面 `localStorage` 持久化队列与行状态 |
+| 防崩溃重复提交 | ✅ | `submitting` 中断后标记“中断待确认”，不自动重提 |
+| 账号异常自动暂停 | ✅ | 未登录、登录失效、额度不足时停止后续连续失败 |
+| 批量成功写入歌曲列表 | ✅ | 调用原 `library:save-submission` |
+| 与后台流水线联动 | ✅ | 批量歌曲继续自动轮询 / WAV / N19 |
 | 3 个固定 Suno 账号位 | ✅ | 账号 1 / 2 / 3 始终固定显示 |
 | 3 个独立 Suno Session | ✅ | `persist:suno-original-demo-1/2/3` |
 | 固定用户数据目录 | ✅ | `%APPDATA%\SunoOriginalStudio` |
@@ -44,9 +59,7 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 | 登录成功即时识别 | ✅ | `__session` 出现后立即标记对应槽位已登录 |
 | 可靠登录状态持久化 | ✅ | `suno-account-login-state-v1.json` |
 | 防空槽位误判登录 | ✅ | `__client` 不再单独代表登录成功 |
-| 短期 `__session` 过期后状态保持 | ✅ | 使用已确认登录状态，不立即误判未登录 |
-| 旧长期 Clerk Session 后台恢复 | ✅ | 仅后台一次性 probe，不阻塞 UI |
-| API Token 按需恢复 | ✅ | 只在提交/刷新/下载等真实 API 请求时获取新 token |
+| API Token 按需恢复 | ✅ | 只在真实 API 请求时获取新 token |
 | 原创歌曲提交 | ✅ | `/api/generate/v2-web/` |
 | 歌名 / 完整歌词 | ✅ | 自定义 |
 | 风格 / 排除风格 | ✅ | `tags` / `negative_tags` |
@@ -56,9 +69,8 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 | 官方人机验证 | ✅ | hCaptcha / Turnstile 官方组件 |
 | 验证完成自动续提 | ✅ | 官方 token 回传 |
 | 持久化歌曲列表 | ✅ | 每个 clip 独立记录 |
-| 手动刷新歌曲状态 | ✅ | `/api/feed/v2` |
 | 主进程后台自动轮询 | ✅ | 默认约 5 秒；未完成歌曲按账号刷新 |
-| 程序启动恢复轮询 | ✅ | `bootstrap.js` 启动 pipeline |
+| 程序启动恢复歌曲轮询 | ✅ | `bootstrap.js` 启动 pipeline |
 | 手动 Suno WAV 下载 | ✅ | `convert_wav` → `wav_file` |
 | 生成完成自动下载 WAV | ✅ | 用户开关 |
 | 自动保存歌词 | ✅ | 与 WAV 同歌曲目录 |
@@ -74,13 +86,82 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 ---
 
-# 三、v0.5.7 关键设计
+# 三、v0.5.8 Excel 批量设计
 
-## 3.1 统一 Session/Auth 与账号状态分层
+## 3.1 Excel 字段
+
+第一张工作表第一行为表头。
+
+```text
+歌名 | 歌词 | 风格 | 排除风格 | 模型 | 人声 | Weirdness | 风格影响 | 账号 | 提交间隔秒 | 启用
+```
+
+规则：
+
+1. `歌名`、`歌词`必填。
+2. 模型默认 `v5.5`。
+3. 人声默认“不指定”，支持“女声 / 男声”。
+4. Weirdness / 风格影响默认 50，范围 0-100。
+5. 账号默认 1，支持 1/2/3；本版不自动 round-robin。
+6. 提交间隔为空时使用软件全局值，默认 20 秒；范围 5-300 秒。
+7. `启用=否` 的行直接跳过。
+
+## 3.2 顺序队列
+
+```text
+导入 Excel
+→ 参数校验 / 预览
+→ 读取当前行账号状态
+→ checkpoint: submitting
+→ 调用现有 original:submit
+→ [需要时] Suno 官方验证
+→ 返回 clip IDs
+→ 写入歌曲列表
+→ checkpoint: submitted
+→ 等待 N 秒
+→ 下一行
+```
+
+提交间隔的作用是控制请求频率。程序不会通过随机伪装、验证码代答或其他方式绕过 Suno 平台限制。
+
+## 3.3 批次恢复
+
+批次状态存储在主界面的 `localStorage`：
+
+- `queued`：等待提交。
+- `submitting`：正在调用 Suno。
+- `submitted`：已成功取得 clip ID 并写入歌曲列表。
+- `error`：提交失败，可人工重试。
+- `invalid`：Excel 参数错误，不提交。
+- `skipped`：Excel 明确禁用。
+- `interrupted`：程序在 `submitting` 阶段退出。
+
+程序重新打开时：
+
+- 原 `running` 批次改为 `paused`。
+- 原 `submitting` 行改为 `interrupted`。
+- `interrupted` 行不会自动重提，防止 Suno 已接单但客户端未来得及记录 clip ID 时造成重复生成。
+
+## 3.4 与歌曲流水线联动
+
+每个 Excel 行成功提交后调用已有 `library:save-submission`，所以后续完全复用原流水线：
+
+```text
+Excel 提交成功
+→ 歌曲列表
+→ 后台轮询 Suno 状态
+→ complete
+→ [自动下载] WAV + 歌词
+→ [自动 N19] exact AVR N19
+```
+
+---
+
+# 四、账号认证与后台歌曲流水线
+
+## 4.1 统一 Session/Auth
 
 共享模块：`suno_session.js`
-
-统一提供：
 
 ```text
 partitionFor(slot)
@@ -92,19 +173,9 @@ flushAccountSession(slot)
 flushAllAccountSessions()
 ```
 
-规则：
+核心规则：账号 UI 状态是本地快速判断；真正 API 调用才恢复 Clerk Token；三个槽位始终使用各自 persistent partition；`__client` 不单独代表已登录。
 
-1. 账号 UI 状态和 API Token 获取彻底分开。
-2. 账号状态查询必须是本地快速操作，不为了看绿点重新加载 Suno 页面。
-3. 对应账号始终使用自己的 persistent partition。
-4. 发现该槽位真实 `__session` 后立即确认登录成功并写入可靠状态文件。
-5. `__client` / `__client_uat` 不能单独代表“已登录”，避免空槽位误判。
-6. 短期 `__session` 过期后，不因临时 token 不可见而立刻把已确认账号显示成未登录。
-7. 只有真正需要 API Token 时，才在该 partition 中恢复 Suno/Clerk 并调用 `window.Clerk.session.getToken()`。
-8. 原创提交、任务刷新、歌曲列表和 WAV 请求都调用共享 Auth 模块。
-9. 旧版本长期 Clerk Session 仅在后台做一次恢复探测，不阻塞账号 UI。
-
-## 3.2 后台歌曲流水线
+## 4.2 后台歌曲流水线
 
 ```text
 提交原创
@@ -116,44 +187,23 @@ flushAllAccountSessions()
 → 本地作品目录
 ```
 
-默认轮询约 5 秒。渲染器不再自己高频请求 Suno API，只读取主进程已经维护的歌曲列表状态。
-
-自动化设置持久化在原 `song-library-v1.json` 内；结构版本升级为 2，但沿用旧文件名兼容旧数据。
-
-## 3.3 幂等与重启恢复
-
-- 已有有效原始 WAV：不重复下载。
-- `wavStatus=downloaded` 且文件存在：直接复用。
-- `deaiStatus=complete` 且 N19 文件存在：不重复消痕。
-- 程序重启后未完成生成任务继续轮询。
-- 自动下载/自动 N19 开关重启后继续生效。
-- 自动处理失败使用指数退避，不高频轰 Suno 接口。
+自动下载和 N19 均使用状态 + 本地文件双重幂等；失败有指数退避。
 
 ---
 
-# 四、当前未完成
+# 五、当前未完成
 
-## P1：Excel 批量原创 + 3 账号调度
+## P1：v0.6.x 多账号自动调度 / 完整任务中心
 
-当前尚未实现：
-
-- Excel 批量导入
-- 导入预览 / 字段校验
-- 多任务提交队列
-- 账号 1→2→3 round-robin
+- 账号 1→2→3 自动 round-robin
 - 单账号 busy 锁
-- 每首提交间隔
+- 多账号同时执行不同歌曲
 - 某账号进入官方验证时只暂停该账号
 - 其他账号继续执行
-- 账号掉线/额度不足处理
-- 批量任务 checkpoint
-- 程序重启恢复未提交队列
-- 失败项重试
-- 暂停/继续队列
-- 取消未提交任务
-- 结果 Excel 导出
-
-计划版本：`v0.6.0` / `v0.6.1`。
+- 更完整的主进程批量 checkpoint
+- 批量结果 Excel 导出
+- 取消单个未提交任务
+- 批次历史 / 多批次管理
 
 ## P2：可选增强
 
@@ -161,6 +211,7 @@ flushAllAccountSessions()
 - Voice / Persona 列表
 - 创建 Voice / Persona
 - 生成版本数量配置
+- 单账号退出 / 清除
 - 歌曲搜索 / 筛选
 - 歌曲删除 / 归档
 - 按 submission 聚合两个版本
@@ -171,9 +222,7 @@ flushAllAccountSessions()
 
 ---
 
-# 五、AVR N19 exact 链路
-
-主链保持不变：
+# 六、AVR N19 exact 链路
 
 ```text
 源音频
@@ -195,7 +244,7 @@ FFmpeg 节点 9：Rubber Band pitch=0.975 / 48kHz / PCM24
 
 ---
 
-# 六、版本记录
+# 七、版本记录
 
 ## v0.5.0
 - 持久化歌曲列表
@@ -218,28 +267,32 @@ FFmpeg 节点 9：Rubber Band pitch=0.975 / 48kHz / PCM24
 - 歌曲列表内置试听播放器
 
 ## v0.5.6
-- 新增共享 `suno_session.js`
-- 原创、任务刷新、歌曲列表、WAV 下载统一 Clerk Session/Auth
-- 去掉歌曲列表短期 `__session` 硬性前置判断
-- 主进程后台自动轮询
-- 自动下载 WAV + 保存歌词开关
-- 自动 AVR N19 开关
-- 自动下载/N19 幂等与重启恢复
-- 自动失败指数退避
+- 统一 Suno Session/Auth
+- 主进程后台轮询
+- 自动下载 WAV + 歌词
+- 自动 AVR N19
 
 ## v0.5.7
-- 将账号认证稳定性修复正式升级为新版本，不再沿用 v0.5.6
-- 三个账号位固定显示，账号状态各自独立更新
-- 账号状态刷新改为本地快速判断，不再启动隐藏 Suno 页面
-- 登录生成 `__session` 后立即确认并持久化登录状态
-- 增加 `suno-account-login-state-v1.json` 可靠状态记录
-- `__client` 不再造成空账号位假登录
-- 旧长期 Clerk Session 后台恢复，不阻塞 UI
-- 18 秒 Clerk 等待仅用于真正 API Token 获取
+- 账号 1/2/3 固定槽位
+- 账号状态快速本地判断
+- 登录状态可靠持久化
+- 修复关闭登录窗口后误判未登录
+
+## v0.5.8
+- Excel 批量原创导入 / 模板
+- 字段校验与队列预览
+- 顺序逐首提交
+- 默认 20 秒提交间隔 + 5-300 秒可配置
+- Excel 单行间隔覆盖
+- 暂停 / 继续 / 失败重试
+- 批量 localStorage checkpoint
+- 中断提交防自动重复
+- 账号登录/额度异常自动暂停
+- 批量提交结果自动写入歌曲列表并衔接原后台流水线
 
 ---
 
-# 七、维护规则
+# 八、维护规则
 
 1. 每次正式功能修改同步本文件和 README。
 2. N19 exact 模式不允许静默降级。
@@ -247,6 +300,7 @@ FFmpeg 节点 9：Rubber Band pitch=0.975 / 48kHz / PCM24
 4. 所有 Suno API token 获取统一使用 `suno_session.js`。
 5. 账号 UI 登录状态不得通过阻塞式 Suno 页面加载来判断。
 6. 自动下载与自动 N19 必须保持幂等。
-7. 批量原创必须先写 checkpoint 再进入下一首，避免重复提交。
-8. Suno Web 私有接口错误必须明确记录，不能静默吞错。
-9. 人机验证只走官方组件，不识别、不绕过、不伪造 token、不第三方代解。
+7. 批量原创每行在调用 Suno 前必须 checkpoint 为 `submitting`，成功返回 clip ID 后才能标记 `submitted`。
+8. `submitting` 状态发生程序中断时，禁止自动重新提交，必须转为“中断待确认”。
+9. Suno Web 私有接口错误必须明确记录，不能静默吞错。
+10. 人机验证只走官方组件，不识别、不绕过、不伪造 token、不第三方代解。
