@@ -42,8 +42,8 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.6_Windows
-          exe=SunoOriginalStudio_v0.5.6.exe
+          artifact=SunoOriginalStudio_v0.5.7_Windows
+          exe=SunoOriginalStudio_v0.5.7.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
@@ -61,7 +61,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Start SunoOriginalStudio v0.5.6 build ${{ github.run_id }}"
+            git commit -m "Start SunoOriginalStudio v0.5.7 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Build status already current.'
@@ -146,7 +146,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.6.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.7.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -162,23 +162,23 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.6_Windows
-          path: dist/SunoOriginalStudio_v0.5.6.exe
+          name: SunoOriginalStudio_v0.5.7_Windows
+          path: dist/SunoOriginalStudio_v0.5.7.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.6
-          name: Suno Original Studio v0.5.6
+          tag_name: suno-original-studio-v0.5.7
+          name: Suno Original Studio v0.5.7
           prerelease: true
           make_latest: false
-          files: dist/SunoOriginalStudio_v0.5.6.exe
+          files: dist/SunoOriginalStudio_v0.5.7.exe
           body: |
-            Unifies Suno Clerk Session/Auth across original generation, status refresh and WAV download.
-            Adds main-process background polling, optional automatic Suno WAV + lyrics saving, and optional automatic exact AVR N19 processing.
-            Keeps persistent 3-account sessions, negative style, no-repeat AI cleaning, song-list playback, and exact AVR 1.77.0 N19 processing.
+            Promotes the authentication/session stability fixes to v0.5.7.
+            Keeps fast local three-slot account status, persistent verified login state, unified Suno Clerk Auth, background polling, automatic WAV + lyrics saving, and optional exact AVR N19 processing.
+            Keeps negative style, no-repeat AI cleaning, song-list playback, and exact AVR 1.77.0 N19 processing.
 
       - name: Report successful build
         shell: pwsh
@@ -187,8 +187,8 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.6_Windows
-          exe=SunoOriginalStudio_v0.5.6.exe
+          artifact=SunoOriginalStudio_v0.5.7_Windows
+          exe=SunoOriginalStudio_v0.5.7.exe
           source_sha=${{ github.sha }}
           exact_n19_toolchain=true
           song_library=true
@@ -204,7 +204,7 @@ jobs:
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Finish SunoOriginalStudio v0.5.6 build ${{ github.run_id }}"
+            git commit -m "Finish SunoOriginalStudio v0.5.7 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Success status already current.'
