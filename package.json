@@ -1,13 +1,16 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.7",
-  "description": "Suno Original Studio v0.5.7 with stable three-slot Suno auth, background polling, automatic WAV/lyrics saving, and optional exact AVR N19 processing",
+  "version": "0.5.8",
+  "description": "Suno Original Studio v0.5.8 with Excel batch original-song submission, stable three-slot Suno auth, background polling, automatic WAV/lyrics saving, and optional exact AVR N19 processing",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "xlsx": "0.18.5"
   },
   "devDependencies": {
     "electron": "37.4.0",
@@ -27,6 +30,8 @@
       "index.html",
       "renderer.js",
       "account_slots_fix.js",
+      "batch_renderer.js",
+      "node_modules/xlsx/**/*",
       "package.json"
     ],
     "extraResources": [
@@ -38,7 +43,7 @@
     ],
     "win": {
       "target": [{"target":"portable","arch":["x64"]}],
-      "artifactName": "SunoOriginalStudio_v0.5.7.exe"
+      "artifactName": "SunoOriginalStudio_v0.5.8.exe"
     }
   }
 }
