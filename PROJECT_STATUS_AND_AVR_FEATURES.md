@@ -39,6 +39,7 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 | Excel 一行一首歌 | ✅ | 每行转换为一个顺序队列任务 |
 | Excel 参数校验/预览 | ✅ | 必填字段、模型、人声、账号校验 |
 | Excel 模板下载 | ✅ | 软件内生成“批量原创 + 填写说明”模板 |
+| 仓库正式 Excel 模板 | ✅ | `templates/SunoOriginalStudio批量原创模板_v0.5.8.xlsx` |
 | Excel 顺序提交队列 | ✅ | 一首完成提交后再进入下一首 |
 | 默认提交间隔 | ✅ | 默认 20 秒，可配置 5-300 秒 |
 | 单行提交间隔覆盖 | ✅ | Excel `提交间隔秒` 优先于全局值 |
@@ -58,7 +59,7 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 | 账号状态本地快速判断 | ✅ | 刷新绿点不再加载隐藏 Suno 页面 |
 | 登录成功即时识别 | ✅ | `__session` 出现后立即标记对应槽位已登录 |
 | 可靠登录状态持久化 | ✅ | `suno-account-login-state-v1.json` |
-| 防空槽位误判登录 | ✅ | `__client` 不再单独代表登录成功 |
+| 防空槽位误判登录 | ✅ | `__client` 不再单独代表已登录 |
 | API Token 按需恢复 | ✅ | 只在真实 API 请求时获取新 token |
 | 原创歌曲提交 | ✅ | `/api/generate/v2-web/` |
 | 歌名 / 完整歌词 | ✅ | 自定义 |
@@ -88,9 +89,19 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 # 三、v0.5.8 Excel 批量设计
 
-## 3.1 Excel 字段
+## 3.1 Excel 字段与正式模板
 
-第一张工作表第一行为表头。
+仓库正式模板：
+
+`templates/SunoOriginalStudio批量原创模板_v0.5.8.xlsx`
+
+模板包含：
+
+- 第一张工作表 `批量原创`：真正导入的数据表。
+- 第二张工作表 `填写说明`：字段解释和填写规则。
+- 模型、人声、账号、启用等列的下拉选项。
+
+程序只读取第一张工作表，第一行为表头。
 
 ```text
 歌名 | 歌词 | 风格 | 排除风格 | 模型 | 人声 | Weirdness | 风格影响 | 账号 | 提交间隔秒 | 启用
@@ -105,6 +116,10 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 5. 账号默认 1，支持 1/2/3；本版不自动 round-robin。
 6. 提交间隔为空时使用软件全局值，默认 20 秒；范围 5-300 秒。
 7. `启用=否` 的行直接跳过。
+8. 完全空白行忽略。
+9. 正式使用优先采用仓库模板，不建议随意修改表头。
+
+完整字段别名、值兼容、队列状态和恢复规则统一维护在 `BATCH_EXCEL_V0.5.8.md`。
 
 ## 3.2 顺序队列
 
@@ -126,7 +141,7 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 ## 3.3 批次恢复
 
-批次状态存储在主界面的 `localStorage`：
+批次状态存储在主界面的 `localStorage`，当前键名为 `suno-batch-v058`：
 
 - `queued`：等待提交。
 - `submitting`：正在调用 Suno。
@@ -140,6 +155,7 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 - 原 `running` 批次改为 `paused`。
 - 原 `submitting` 行改为 `interrupted`。
+- 已 `submitted` 的行不会再次提交。
 - `interrupted` 行不会自动重提，防止 Suno 已接单但客户端未来得及记录 clip ID 时造成重复生成。
 
 ## 3.4 与歌曲流水线联动
@@ -148,7 +164,7 @@ SunoOriginalStudio 是独立 Windows Electron 桌面工具，主线围绕：
 
 ```text
 Excel 提交成功
-→ 歌曲列表
+→ 两个 clip 写入歌曲列表
 → 后台轮询 Suno 状态
 → complete
 → [自动下载] WAV + 歌词
@@ -289,6 +305,7 @@ FFmpeg 节点 9：Rubber Band pitch=0.975 / 48kHz / PCM24
 - 中断提交防自动重复
 - 账号登录/额度异常自动暂停
 - 批量提交结果自动写入歌曲列表并衔接原后台流水线
+- 正式 Excel 模板纳入仓库 `templates/` 并由文档统一维护
 
 ---
 
@@ -304,3 +321,4 @@ FFmpeg 节点 9：Rubber Band pitch=0.975 / 48kHz / PCM24
 8. `submitting` 状态发生程序中断时，禁止自动重新提交，必须转为“中断待确认”。
 9. Suno Web 私有接口错误必须明确记录，不能静默吞错。
 10. 人机验证只走官方组件，不识别、不绕过、不伪造 token、不第三方代解。
+11. Excel 字段结构、默认值或解析规则发生变化时，必须同步更新 `templates/` 中的正式模板、`BATCH_EXCEL_V0.5.8.md`、README 和本状态文档；新正式版本应使用新的模板文件名，避免旧模板与新代码混用。
