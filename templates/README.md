@@ -4,6 +4,12 @@
 
 - `SunoOriginalStudio批量原创模板_v0.5.8.xlsx`
 
+模板 SHA-256：
+
+```text
+526f699c5ce1f709683c0524074f4125f5d74241c2ec641f868f889bcb7afba5
+```
+
 用途：给 SunoOriginalStudio v0.5.8 的“Excel 批量原创”页面直接导入。
 
 第一张工作表必须是批量数据表；程序只读取第一张工作表。标准表头：
