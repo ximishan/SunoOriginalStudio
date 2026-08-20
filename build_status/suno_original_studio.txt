@@ -1,8 +1,10 @@
-status=success
-run_id=32325710832
-artifact=SunoOriginalStudio_v0.5.7_Windows
-exe=SunoOriginalStudio_v0.5.7.exe
-source_sha=68210e7994ce091c76d8cc3567336a984e495be4
+status=started
+run_id=32344375003
+artifact=SunoOriginalStudio_v0.5.8_Windows
+exe=SunoOriginalStudio_v0.5.8.exe
+source_sha=197cdcdacc87e6313e863c9c517daed8cb5c62e1
+excel_batch_submission=true
+batch_default_interval_seconds=20
 exact_n19_toolchain=true
 song_library=true
 song_player=true
