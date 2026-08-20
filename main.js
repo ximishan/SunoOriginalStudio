@@ -563,7 +563,7 @@ function createMainWindow() {
     height: 820,
     minWidth: 1000,
     minHeight: 700,
-    title: 'Suno Original Studio v0.5.6',
+    title: 'Suno Original Studio v0.5.7',
     backgroundColor: '#0b0c10',
     autoHideMenuBar: true,
     webPreferences: {
