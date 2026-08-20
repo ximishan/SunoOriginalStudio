@@ -24,6 +24,8 @@ on:
       - 'V0.5.4_SONG_PLAYER.md'
       - 'V0.5.6_AUTOMATION_PIPELINE.md'
       - 'BATCH_EXCEL_V0.5.8.md'
+      - 'templates/SunoOriginalStudio批量原创模板_v0.5.8.xlsx'
+      - 'templates/README.md'
       - 'PROFILE_PERSISTENCE.md'
       - '.github/workflows/build-windows.yml'
 
@@ -78,6 +80,28 @@ jobs:
 
       - name: Install JavaScript dependencies
         run: npm install
+
+      - name: Verify repository Excel template
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $template = 'templates/SunoOriginalStudio批量原创模板_v0.5.8.xlsx'
+          if (-not (Test-Path $template)) { throw "Excel template missing: $template" }
+          @'
+          const XLSX = require('xlsx');
+          const file = 'templates/SunoOriginalStudio批量原创模板_v0.5.8.xlsx';
+          const wb = XLSX.readFile(file);
+          if (!wb.SheetNames.length) throw new Error('Excel template has no worksheets');
+          const first = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(first, { header: 1, defval: '' });
+          const expected = ['歌名','歌词','风格','排除风格','模型','人声','Weirdness','风格影响','账号','提交间隔秒','启用'];
+          const actual = (rows[0] || []).slice(0, expected.length).map(x => String(x).trim());
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(`Excel template headers mismatch. expected=${JSON.stringify(expected)} actual=${JSON.stringify(actual)}`);
+          }
+          if (!wb.SheetNames.includes('填写说明')) throw new Error('Excel template missing 填写说明 worksheet');
+          console.log('Excel template verified:', wb.SheetNames.join(', '));
+          '@ | node
 
       - name: Prepare exact AVR N19 toolchain
         shell: pwsh
