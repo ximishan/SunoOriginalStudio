@@ -14,6 +14,7 @@ on:
       - 'preload.js'
       - 'renderer.js'
       - 'batch_renderer.js'
+      - 'renderer.js'
       - 'index.html'
       - 'package.json'
       - 'PROJECT_STATUS_AND_AVR_FEATURES.md'
@@ -24,6 +25,7 @@ on:
       - 'V0.5.4_SONG_PLAYER.md'
       - 'V0.5.6_AUTOMATION_PIPELINE.md'
       - 'BATCH_EXCEL_V0.5.8.md'
+      - 'BATCH_EXCEL_V0.5.9.md'
       - 'templates/SunoOriginalStudio批量原创模板_v0.5.8.xlsx'
       - 'templates/README.md'
       - 'PROFILE_PERSISTENCE.md'
@@ -46,8 +48,8 @@ jobs:
           @"
           status=started
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.8_Windows
-          exe=SunoOriginalStudio_v0.5.8.exe
+          artifact=SunoOriginalStudio_v0.5.9_Windows
+          exe=SunoOriginalStudio_v0.5.9.exe
           source_sha=${{ github.sha }}
           excel_batch_submission=true
           batch_default_interval_seconds=20
@@ -61,13 +63,15 @@ jobs:
           stable_session_profile=true
           negative_style=true
           skip_completed_deai=true
+          paginated_song_library=true
+          optimized_excel_parsing=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Start SunoOriginalStudio v0.5.8 build ${{ github.run_id }}"
+            git commit -m "Start SunoOriginalStudio v0.5.9 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Build status already current.'
@@ -175,7 +179,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.8.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.9.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -191,23 +195,23 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.8_Windows
-          path: dist/SunoOriginalStudio_v0.5.8.exe
+          name: SunoOriginalStudio_v0.5.9_Windows
+          path: dist/SunoOriginalStudio_v0.5.9.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.8
-          name: Suno Original Studio v0.5.8
+          tag_name: suno-original-studio-v0.5.9
+          name: Suno Original Studio v0.5.9
           prerelease: true
-          make_latest: false
-          files: dist/SunoOriginalStudio_v0.5.8.exe
+          make_latest: true
+          files: dist/SunoOriginalStudio_v0.5.9.exe
           body: |
-            Adds Excel batch original-song submission with one row per song, parameter validation, preview, pause/resume, failed-row retry, local checkpointing, and configurable spacing between submissions (default 20 seconds).
+            v0.5.9 adds a paginated song library (default 20 per page, switchable 20 / 50 / 100 / all; pagination only affects display and never affects background polling, WAV download, lyrics saving, or the AVR N19 pipeline) and optimized Excel batch parsing (skips blank rows, counts only valid songs, row-numbered error messages).
             Each successful Excel row is saved into the same persistent song library, so the existing background status polling, optional WAV + lyrics auto-download, and optional exact AVR N19 pipeline continue automatically.
-            Keeps the stable three-slot Suno account/session implementation from v0.5.7. Official Suno verification is still handled through Suno's own verification flow.
+            Keeps the stable three-slot Suno account/session implementation. Official Suno verification is still handled through Suno's own verification flow.
 
       - name: Report successful build
         shell: pwsh
@@ -216,8 +220,8 @@ jobs:
           @"
           status=success
           run_id=${{ github.run_id }}
-          artifact=SunoOriginalStudio_v0.5.8_Windows
-          exe=SunoOriginalStudio_v0.5.8.exe
+          artifact=SunoOriginalStudio_v0.5.9_Windows
+          exe=SunoOriginalStudio_v0.5.9.exe
           source_sha=${{ github.sha }}
           excel_batch_submission=true
           batch_default_interval_seconds=20
@@ -231,11 +235,13 @@ jobs:
           stable_session_profile=true
           negative_style=true
           skip_completed_deai=true
+          paginated_song_library=true
+          optimized_excel_parsing=true
           "@ | Set-Content -Encoding UTF8 build_status/suno_original_studio.txt
           git add build_status/suno_original_studio.txt
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 1) {
-            git commit -m "Finish SunoOriginalStudio v0.5.8 build ${{ github.run_id }}"
+            git commit -m "Finish SunoOriginalStudio v0.5.9 build ${{ github.run_id }}"
             git push
           } else {
             Write-Host 'Success status already current.'
