@@ -2,7 +2,7 @@
 
 独立的 Suno 原创歌曲 Windows 桌面工具。
 
-## 当前版本：v0.5.8
+## 当前版本：v0.5.9
 
 当前已经包含：
 
@@ -51,6 +51,7 @@
 - 独立“AI 消痕”页面，支持本地多文件处理
 - 歌曲列表内置试听播放器
 - 试听支持播放/暂停、停止、进度拖动、时间显示、音量调节
+- **歌曲列表分页显示**：默认每页 20 首，支持 20 / 50 / 100 / 全部切换；分页只影响显示，不影响后台轮询、下载、消痕等任务
 - 播放源优先级：N19 WAV → Suno 原始 WAV → Suno `audio_url` → CDN MP3 fallback
 
 ## Excel 批量原创模板
@@ -100,6 +101,7 @@
 - `V0.5.3_NO_REPEAT_DEAI.md`：已消痕歌曲防重复处理
 - `V0.5.4_SONG_PLAYER.md`：歌曲列表试听播放器
 - `V0.5.6_AUTOMATION_PIPELINE.md`：统一 Session/Auth 与自动轮询/下载/N19 的实现历史
+- `BATCH_EXCEL_V0.5.9.md`：v0.5.9 Excel 解析优化与歌曲列表分页说明
 - `PROFILE_PERSISTENCE.md`：账号 Profile / Session 持久化
 - `THIRD_PARTY_N19.md`：N19 工具链、哈希、阶段与第三方说明
 

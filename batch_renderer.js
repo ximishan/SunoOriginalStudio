@@ -91,7 +91,7 @@
     $('batchStart').onclick=start; $('batchPause').onclick=()=>{if(running){pauseRequested=true;state.lastError='已请求暂停；当前歌曲提交结束后暂停。';save();render();}};
     $('batchRetry').onclick=retry; $('batchClear').onclick=clear;
     $('batchInterval').onchange=()=>{state.defaultInterval=clamp(num($('batchInterval').value,DEF),MIN,MAX);save();render();};
-    const h=document.querySelector('h1');if(h)h.textContent='Suno Original Studio v0.5.8';document.title='Suno Original Studio v0.5.8';render();
+    const h=document.querySelector('h1');if(h)h.textContent='Suno Original Studio v0.5.9';document.title='Suno Original Studio v0.5.9';render();
   }
 
   function log(t,cls=''){const b=$('batchLog');if(!b)return;b.innerHTML+=`\n<span class="${cls}">[${new Date().toLocaleTimeString()}] ${esc(t)}</span>`;b.scrollTop=b.scrollHeight;}
