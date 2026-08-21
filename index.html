@@ -57,6 +57,14 @@
     .inline-actions button { padding:6px 9px; font-size:11px; }
     .library-empty { padding:28px; text-align:center; color:#8f98aa; }
     .library-summary { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+    .library-pagination { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:12px; }
+    .library-pagination .pager-info { color:#8f98aa; font-size:12px; }
+    .library-pagination .pager-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .library-pagination .pager-controls button { padding:6px 11px; font-size:12px; }
+    .library-pagination .pager-controls button:disabled { opacity:.45; cursor:not-allowed; }
+    .library-pagination .pager-current { color:#b9c2d0; font-size:12px; min-width:74px; text-align:center; }
+    .library-pagination .pager-size { display:flex; align-items:center; gap:6px; color:#8f98aa; font-size:12px; }
+    .library-pagination .pager-size select { width:auto; padding:5px 8px; font-size:12px; }
     .check { width:auto; }
     .player-bar { margin-top:14px; display:grid; grid-template-columns:auto minmax(220px,1fr) auto; gap:12px; align-items:center; padding:12px; border:1px solid #2a3040; border-radius:12px; background:#10141d; }
     .player-buttons { display:flex; gap:8px; }
@@ -183,6 +191,23 @@
             </thead>
             <tbody id="songTableBody"><tr><td colspan="8" class="library-empty">还没有歌曲。</td></tr></tbody>
           </table>
+        </div>
+        <div id="libraryPagination" class="library-pagination hidden">
+          <div class="pager-info" id="libraryPagerInfo"></div>
+          <div class="pager-controls">
+            <button id="libraryPagePrev" class="secondary">上一页</button>
+            <span class="pager-current" id="libraryPageCurrent">1 / 1</span>
+            <button id="libraryPageNext" class="secondary">下一页</button>
+          </div>
+          <label class="pager-size">每页
+            <select id="libraryPageSize">
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="all">全部</option>
+            </select>
+            首
+          </label>
         </div>
         <div id="libraryLog" class="log">歌曲列表准备就绪。</div>
       </div>
