@@ -7,6 +7,8 @@ let songLibrary = { songs: [], rootDir: '', automation: {} };
 let songAutomation = { autoDownload: false, autoN19: false, running: false, working: false, lastRunAt: '', lastError: '' };
 let selectedSongIds = new Set();
 let libraryBusy = false;
+let libraryPage = 1;
+let libraryPageSize = 20;
 const libraryAudio = new Audio();
 let playingClipId = '';
 let playingSource = null;
@@ -247,9 +249,19 @@ function renderSongLibrary() {
   const body = $('songTableBody');
   if (!songs.length) {
     body.innerHTML = '<tr><td colspan="8" class="library-empty">还没有歌曲。提交原创后会自动出现在这里。</td></tr>';
+    renderLibraryPagination(0, 0, 0);
     return;
   }
-  body.innerHTML = songs.map(song => {
+  const total = songs.length;
+  const showAll = libraryPageSize === 'all';
+  const size = showAll ? total : Math.max(1, Number(libraryPageSize) || 20);
+  const totalPages = showAll ? 1 : Math.max(1, Math.ceil(total / size));
+  if (libraryPage > totalPages) libraryPage = totalPages;
+  if (libraryPage < 1) libraryPage = 1;
+  const start = showAll ? 0 : (libraryPage - 1) * size;
+  const end = showAll ? total : Math.min(total, start + size);
+  const pageSongs = songs.slice(start, end);
+  body.innerHTML = pageSongs.map(song => {
     const canSelect = isSongComplete(song) && song.deaiStatus !== 'processing' && song.deaiStatus !== 'complete';
     if (!canSelect) selectedSongIds.delete(song.clipId);
     const checked = canSelect && selectedSongIds.has(song.clipId) ? 'checked' : '';
@@ -271,8 +283,23 @@ function renderSongLibrary() {
   body.querySelectorAll('[data-play-song]').forEach(btn => btn.onclick = () => playSongFromLibrary(btn.dataset.playSong));
   body.querySelectorAll('[data-open-suno]').forEach(btn => btn.onclick = () => window.demoApi.openSong(`https://suno.com/song/${btn.dataset.openSuno}`));
   body.querySelectorAll('[data-open-local]').forEach(btn => btn.onclick = async () => { try { await window.demoApi.openSongLocalDir(btn.dataset.openLocal); } catch (e) { libraryLog(e?.message || e, 'err'); } });
+  renderLibraryPagination(total, start, end);
   syncMasterCheck();
   refreshPlayerUi();
+}
+
+function renderLibraryPagination(total, start, end) {
+  const wrap = $('libraryPagination');
+  if (!wrap) return;
+  if (!total) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  const showAll = libraryPageSize === 'all';
+  const size = showAll ? total : Math.max(1, Number(libraryPageSize) || 20);
+  const totalPages = showAll ? 1 : Math.max(1, Math.ceil(total / size));
+  $('libraryPagerInfo').textContent = `显示第 ${start + 1}-${end} 首，共 ${total} 首`;
+  $('libraryPageCurrent').textContent = `${libraryPage} / ${totalPages}`;
+  $('libraryPagePrev').disabled = showAll || libraryPage <= 1;
+  $('libraryPageNext').disabled = showAll || libraryPage >= totalPages;
 }
 
 function syncMasterCheck() {
@@ -327,6 +354,10 @@ $('librarySelectAll').onclick = () => { selectedSongIds.clear(); for (const song
 $('libraryMasterCheck').onchange = () => { const checked = $('libraryMasterCheck').checked; document.querySelectorAll('.song-check:not(:disabled)').forEach(box => { box.checked = checked; if (checked) selectedSongIds.add(box.dataset.clip); else selectedSongIds.delete(box.dataset.clip); }); };
 $('libraryChooseRoot').onclick = async () => { try { songLibrary = await window.demoApi.selectSongRoot(); renderSongLibrary(); libraryLog(`保存目录：${songLibrary.rootDir}`, 'oktxt'); } catch (e) { libraryLog(e?.message || e, 'err'); } };
 $('libraryOpenRoot').onclick = async () => { try { await window.demoApi.openSongRoot(); } catch (e) { libraryLog(e?.message || e, 'err'); } };
+
+$('libraryPagePrev').onclick = () => { if (libraryPage > 1) { libraryPage -= 1; renderSongLibrary(); } };
+$('libraryPageNext').onclick = () => { libraryPage += 1; renderSongLibrary(); };
+$('libraryPageSize').onchange = () => { const v = $('libraryPageSize').value; libraryPageSize = v === 'all' ? 'all' : (Number(v) || 20); libraryPage = 1; renderSongLibrary(); };
 
 $('libraryProcessSelected').onclick = async () => {
   if (libraryBusy) return;
