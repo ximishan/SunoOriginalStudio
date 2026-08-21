@@ -1,8 +1,8 @@
 status=started
-run_id=32470463554
+run_id=32470659613
 artifact=SunoOriginalStudio_v0.5.8_Windows
 exe=SunoOriginalStudio_v0.5.8.exe
-source_sha=9dbd5f69368c14ba0478acc511bcde8c2a40548a
+source_sha=d968005ed735450daae23e41310d670ba6e94d8c
 excel_batch_submission=true
 batch_default_interval_seconds=20
 exact_n19_toolchain=true
