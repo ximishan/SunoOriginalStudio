@@ -336,19 +336,37 @@ function pathsForSong(app, song) {
   const state = readState(app);
   const rootDir = state.rootDir || defaultRoot(app);
   const dir = song.localDir || songDir(rootDir, song);
+  // 消痕 WAV 的基础名，歌词文件与其保持完全一致（仅扩展名不同），方便一一配对。
+  const processedBase = `${safeName(song.title)}-消痕-N19`;
+  const processedWavPath = song.processedWavPath || path.join(dir, `${processedBase}.wav`);
+  // 歌词文件名跟随消痕 WAV：<歌名>-消痕-N19.txt
+  const lyricsPath = path.join(dir, `${path.basename(processedWavPath, path.extname(processedWavPath))}.txt`);
   return {
     rootDir,
     dir,
-    lyricsPath: song.lyricsPath || path.join(dir, '歌词.txt'),
+    lyricsPath,
     sourceWavPath: song.sourceWavPath || path.join(dir, `${safeName(song.title)}-Suno原始.wav`),
-    processedWavPath: song.processedWavPath || path.join(dir, `${safeName(song.title)}-消痕-N19.wav`),
+    processedWavPath,
+    // 旧命名，用于迁移：程序早期把歌词固定存成“歌词.txt”，或记录在 song.lyricsPath 中。
+    legacyLyricsPaths: [
+      song.lyricsPath && song.lyricsPath !== lyricsPath ? song.lyricsPath : '',
+      path.join(dir, '歌词.txt'),
+    ].filter(Boolean),
   };
 }
 
 async function ensureSongDownloaded(app, song, sender) {
   const paths = pathsForSong(app, song);
   fs.mkdirSync(paths.dir, { recursive: true });
-  if (!fileReady(paths.lyricsPath)) fs.writeFileSync(paths.lyricsPath, String(song.lyrics || ''), 'utf8');
+  if (!fileReady(paths.lyricsPath)) {
+    // 若存在旧命名的歌词文件（如“歌词.txt”），重命名为与消痕 WAV 一致的新名，避免重复。
+    const legacy = (paths.legacyLyricsPaths || []).find(p => p !== paths.lyricsPath && fileReady(p));
+    if (legacy) {
+      try { fs.renameSync(legacy, paths.lyricsPath); }
+      catch { try { fs.copyFileSync(legacy, paths.lyricsPath); } catch {} }
+    }
+    if (!fileReady(paths.lyricsPath)) fs.writeFileSync(paths.lyricsPath, String(song.lyrics || ''), 'utf8');
+  }
   if (fileReady(paths.sourceWavPath)) {
     return updateSong(app, song.clipId, {
       localDir: paths.dir,
