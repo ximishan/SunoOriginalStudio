@@ -3,12 +3,14 @@ const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, session } = require('electron');
 const { sessionFor, apiHeaders } = require('./suno_session');
 
 const SUNO_API = 'https://studio-api-prod.suno.com';
 const WAV_TIMEOUT_MS = 150000;
 const DEFAULT_POLL_INTERVAL_MS = 5000;
+const DOWNLOAD_MAX_ATTEMPTS = 4;      // WAV 下载最多尝试次数（含首次）
+const DOWNLOAD_RETRY_BASE_MS = 1500;  // 下载失败重试基础退避
 
 let activeProcess = null;
 let automationTimer = null;
@@ -19,6 +21,24 @@ let automationLastError = '';
 const automationRetry = new Map();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// 可重试的偶发网络/SSL 错误（Chromium 网络栈 + 通用网络错误）
+const TRANSIENT_NET_RE = /ERR_SSL_PROTOCOL_ERROR|ERR_CONNECTION|ERR_NETWORK|ERR_TIMED_OUT|ERR_SOCKET|ERR_EMPTY_RESPONSE|ERR_ADDRESS_UNREACHABLE|ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|network|fetch failed|502|503|504/i;
+
+function isTransientNetworkError(err) {
+  return TRANSIENT_NET_RE.test(String(err?.message || err || ''));
+}
+
+function friendlyDownloadError(err) {
+  const msg = String(err?.message || err || '');
+  if (/ERR_SSL_PROTOCOL_ERROR/i.test(msg)) {
+    return `下载 Suno WAV 时 SSL 握手失败（net::ERR_SSL_PROTOCOL_ERROR），已自动重试仍未成功。通常是网络环境（代理/安全软件/公司网关）拦截了 Suno CDN 的 HTTPS 连接。请更换网络（如关闭代理或切换网络）后，点“刷新 Suno 状态”重新处理。原始信息：${msg}`;
+  }
+  if (isTransientNetworkError(err)) {
+    return `下载 Suno WAV 失败（网络波动），已自动重试仍未成功，请稍后重新处理。原始信息：${msg}`;
+  }
+  return msg;
+}
 
 const AVR_TOOLCHAIN_HASHES = Object.freeze({
   'ffmpeg-win-x86_64-v7.1.exe': '2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3',
@@ -290,11 +310,16 @@ async function requestWavUrl(slot, clipId, sender) {
   }
   const deadline = Date.now() + WAV_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const res = await ses.fetch(`${SUNO_API}/api/gen/${clipId}/wav_file/`, { headers });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      const url = data.wav_file_url || data.audio_url_wav || data.wav_url || '';
-      if (url) return url;
+    try {
+      const res = await ses.fetch(`${SUNO_API}/api/gen/${clipId}/wav_file/`, { headers });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const url = data.wav_file_url || data.audio_url_wav || data.wav_url || '';
+        if (url) return url;
+      }
+    } catch (e) {
+      // 轮询期间的偶发网络/SSL 错误不应中断整个流程，继续等待重试。
+      if (!isTransientNetworkError(e)) throw e;
     }
     emit(sender, { type: 'progress', clipId, message: 'Suno 正在生成 WAV，等待中…' });
     await sleep(2500);
@@ -302,15 +327,45 @@ async function requestWavUrl(slot, clipId, sender) {
   throw new Error('等待 Suno WAV 导出超过 150 秒');
 }
 
-async function downloadToFile(slot, url, filePath) {
-  const ses = sessionFor(slot);
-  const res = await ses.fetch(url);
-  if (!res.ok) throw new Error(`下载 Suno WAV 失败（${res.status}）`);
+// 单次下载尝试。Suno 的 WAV 下载 URL 是带签名的 CDN 地址，不依赖账号 Cookie，
+// 因此默认用干净的默认 session 发起（避免绑定账号 session 偶发的 TLS 握手问题）。
+async function downloadAttempt(url, filePath, useAccountSession, slot) {
+  const ses = useAccountSession ? sessionFor(slot) : session.defaultSession;
+  const res = await ses.fetch(url, { cache: 'no-store' });
+  if (!res.ok) {
+    const err = new Error(`下载 Suno WAV 失败（HTTP ${res.status}）`);
+    err.httpStatus = res.status;
+    throw err;
+  }
   const buffer = Buffer.from(await res.arrayBuffer());
   if (!buffer.length) throw new Error('下载到的 Suno WAV 为空');
   const tmp = `${filePath}.part`;
   fs.writeFileSync(tmp, buffer);
   fs.renameSync(tmp, filePath);
+}
+
+async function downloadToFile(slot, url, filePath, sender, clipId) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt += 1) {
+    // 第 1 次用默认 session；若失败则在后续尝试中交替回退到账号 session，兼容两种网络路径。
+    const useAccountSession = attempt % 2 === 0;
+    try {
+      if (attempt > 1 && sender) {
+        emit(sender, { type: 'progress', clipId, message: `下载 Suno WAV 重试中（第 ${attempt}/${DOWNLOAD_MAX_ATTEMPTS} 次${useAccountSession ? '，改用账号会话' : ''}）…` });
+      }
+      await downloadAttempt(url, filePath, useAccountSession, slot);
+      return;
+    } catch (e) {
+      lastError = e;
+      // HTTP 4xx（除 408/429）通常不可重试（如 403 无权限、404 链接失效）。
+      const status = Number(e?.httpStatus || 0);
+      const retriableHttp = status === 0 || status === 408 || status === 429 || status >= 500;
+      const retriable = (isTransientNetworkError(e) || retriableHttp) && attempt < DOWNLOAD_MAX_ATTEMPTS;
+      if (!retriable) break;
+      await sleep(DOWNLOAD_RETRY_BASE_MS * attempt);
+    }
+  }
+  throw new Error(friendlyDownloadError(lastError));
 }
 
 function songDir(rootDir, song) {
@@ -385,7 +440,7 @@ async function ensureSongDownloaded(app, song, sender) {
     lastError: '',
   }, sender);
   const wavUrl = await requestWavUrl(song.slot, song.clipId, sender);
-  await downloadToFile(song.slot, wavUrl, paths.sourceWavPath);
+  await downloadToFile(song.slot, wavUrl, paths.sourceWavPath, sender, song.clipId);
   return updateSong(app, song.clipId, {
     wavUrl,
     localDir: paths.dir,
