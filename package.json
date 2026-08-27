@@ -24,6 +24,7 @@
       "bootstrap.js",
       "main.js",
       "suno_session.js",
+      "auth_fetch_guard.js",
       "deai.js",
       "song_library.js",
       "song_library_guard.js",
