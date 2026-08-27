@@ -169,6 +169,7 @@ async function warmUnknownAccountStates() {
 
 const profileInfo = prepareStableProfile();
 const { installSongLibraryWriteGuard } = require('./song_library_guard');
+const { installAuthFetchGuard } = require('./auth_fetch_guard');
 installSongLibraryWriteGuard(app);
 
 const { registerDeaiIpc } = require('./deai');
@@ -176,6 +177,7 @@ const { registerSongLibraryIpc, startSongLibraryAutomation, stopSongLibraryAutom
 require('./main');
 
 app.whenReady().then(() => {
+  installAuthFetchGuard();
   installAccountPersistence();
   registerDeaiIpc({ app, ipcMain, dialog, shell });
   registerSongLibraryIpc({ app, ipcMain, dialog, shell });
