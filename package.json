@@ -26,6 +26,7 @@
       "suno_session.js",
       "deai.js",
       "song_library.js",
+      "song_library_guard.js",
       "preload.js",
       "index.html",
       "renderer.js",
