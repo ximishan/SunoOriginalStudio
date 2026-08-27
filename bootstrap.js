@@ -7,7 +7,9 @@ const {
   flushAllAccountSessions,
   getAccountStatus,
   probeUnknownAccount,
+  warmKnownAccounts,
   noteSessionCookie,
+  saveAccountCookieSnapshot,
   destroyAuthWindows,
 } = require('./suno_session');
 
@@ -58,9 +60,11 @@ function prepareStableProfile() {
         const targetPartition = path.join(stablePartitions, `suno-original-demo-${slot}`);
         if (fs.existsSync(sourcePartition)) copyDir(sourcePartition, targetPartition);
       }
-      const oldLibrary = path.join(source, 'song-library-v1.json');
-      const newLibrary = path.join(stableRoot, 'song-library-v1.json');
-      if (fs.existsSync(oldLibrary) && !fs.existsSync(newLibrary)) fs.copyFileSync(oldLibrary, newLibrary);
+      for (const name of ['song-library-v1.json', 'suno-account-login-state-v1.json', 'suno-sessions.dat']) {
+        const oldFile = path.join(source, name);
+        const newFile = path.join(stableRoot, name);
+        if (fs.existsSync(oldFile) && !fs.existsSync(newFile)) fs.copyFileSync(oldFile, newFile);
+      }
       migratedFrom = source;
     }
   }
@@ -76,6 +80,7 @@ function prepareStableProfile() {
 }
 
 const flushTimers = new Map();
+const snapshotTimers = new Map();
 const accountStateTimers = new Map();
 const lastKnownLoginState = new Map();
 
@@ -118,6 +123,16 @@ function scheduleAccountFlush(slot, delay = 450) {
   flushTimers.set(slot, timer);
 }
 
+function scheduleAccountSnapshot(slot, delay = 900) {
+  const old = snapshotTimers.get(slot);
+  if (old) clearTimeout(old);
+  const timer = setTimeout(() => {
+    snapshotTimers.delete(slot);
+    saveAccountCookieSnapshot(slot).catch(() => {});
+  }, delay);
+  snapshotTimers.set(slot, timer);
+}
+
 function installAccountPersistence() {
   for (const slot of ACCOUNT_SLOTS) {
     const ses = session.fromPartition(partitionFor(slot));
@@ -129,6 +144,7 @@ function installAccountPersistence() {
 
       const becameLoggedIn = noteSessionCookie(slot, cookie, Boolean(removed));
       scheduleAccountFlush(slot, becameLoggedIn ? 120 : 450);
+      scheduleAccountSnapshot(slot, becameLoggedIn ? 240 : 900);
       emitAccountStateChanged(slot, becameLoggedIn ? 80 : 300);
     });
   }
@@ -138,7 +154,7 @@ function installAccountPersistence() {
 }
 
 async function warmUnknownAccountStates() {
-  // UI 不等待这里。只用于从旧版 profile 一次性恢复长期 Clerk 登录状态。
+  // UI 不等待这里。升级后恢复旧 profile / 持久 Clerk 登录状态。
   for (const slot of ACCOUNT_SLOTS) {
     try {
       const before = await getAccountStatus(slot);
@@ -165,17 +181,16 @@ app.whenReady().then(() => {
   registerSongLibraryIpc({ app, ipcMain, dialog, shell });
   startSongLibraryAutomation(app);
 
-  // account:status 保留 main.js 注册的处理器：它会附带当前可见登录窗口和验证码状态。
-  // suno_session.getAccountStatus 本身已经是纯本地快速查询，不再需要 bootstrap 覆盖 handler。
-
   ipcMain.handle('app:profile-info', async () => ({
     userData: app.getPath('userData'),
     sessionData: app.getPath('sessionData'),
     migratedFrom: profileInfo.migratedFrom || '',
   }));
 
-  flushAllAccountSessions().catch(() => {});
+  // 先从加密 Cookie 快照回灌已知账号，再后台探测旧版/未知账号。
+  setTimeout(() => warmKnownAccounts().catch(() => {}), 300);
   setTimeout(() => warmUnknownAccountStates().catch(() => {}), 1800);
+  setTimeout(() => flushAllAccountSessions().catch(() => {}), 3200);
 });
 
 let quitFlushStarted = false;
@@ -194,6 +209,8 @@ app.on('before-quit', event => {
   accountStateTimers.clear();
   for (const timer of flushTimers.values()) clearTimeout(timer);
   flushTimers.clear();
+  for (const timer of snapshotTimers.values()) clearTimeout(timer);
+  snapshotTimers.clear();
   flushAllAccountSessions()
     .finally(() => {
       quitFlushDone = true;
