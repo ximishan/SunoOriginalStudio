@@ -152,6 +152,8 @@ async function warmUnknownAccountStates() {
 }
 
 const profileInfo = prepareStableProfile();
+const { installSongLibraryWriteGuard } = require('./song_library_guard');
+installSongLibraryWriteGuard(app);
 
 const { registerDeaiIpc } = require('./deai');
 const { registerSongLibraryIpc, startSongLibraryAutomation, stopSongLibraryAutomation } = require('./song_library');
