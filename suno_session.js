@@ -6,11 +6,14 @@ const SUNO_HOME = 'https://suno.com/';
 const SUNO_STUDIO = 'https://suno.com/studio';
 const ACCOUNT_SLOTS = ['1', '2', '3'];
 const AUTH_WAIT_MS = 18000;
+const AUTH_RESTORE_WAIT_MS = 12000;
 const LOGIN_STATE_FILE = 'suno-account-login-state-v1.json';
 
 const authWindows = new Map();
 const tokenInflight = new Map();
 let loginStateCache = null;
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function normalizeSlot(slot) {
   const value = String(slot || '1');
@@ -76,7 +79,7 @@ function markAccountVerified(slot, loggedIn = true, source = 'unknown') {
 function hasDurableClerkCookie(cookies) {
   return cookies.some(cookie => {
     const name = String(cookie?.name || '');
-    return name === '__client' || name === '__client_uat' || name.startsWith('__client_');
+    return name === '__client' || name === '__client_uat' || name.startsWith('__client_') || /clerk.*client/i.test(name);
   });
 }
 
@@ -111,11 +114,7 @@ async function ensureAuthWindow(slot) {
   slot = normalizeSlot(slot);
   await app.whenReady();
   let win = authWindows.get(slot);
-  if (win && !win.isDestroyed()) {
-    const url = win.webContents.getURL();
-    if (!url.startsWith('https://suno.com/')) await win.loadURL(SUNO_STUDIO);
-    return win;
-  }
+  if (win && !win.isDestroyed()) return win;
 
   win = new BrowserWindow({
     width: 1100,
@@ -133,6 +132,9 @@ async function ensureAuthWindow(slot) {
     },
   });
   win.on('closed', () => authWindows.delete(slot));
+  win.webContents.on('did-finish-load', () => {
+    flushAccountSession(slot).catch(() => {});
+  });
   authWindows.set(slot, win);
   await win.loadURL(SUNO_STUDIO);
   return win;
@@ -164,19 +166,55 @@ async function readAuthState(win, waitMs = AUTH_WAIT_MS) {
   })()`);
 }
 
+async function loadForSessionRestore(win, slot) {
+  try {
+    await flushAccountSession(slot);
+  } catch {}
+  try {
+    await win.loadURL(SUNO_HOME);
+    await sleep(500);
+    await win.loadURL(SUNO_STUDIO);
+  } catch {}
+}
+
+async function restoreAuthState(slot, waitMs = AUTH_RESTORE_WAIT_MS) {
+  slot = normalizeSlot(slot);
+  const win = await ensureAuthWindow(slot);
+
+  let result = await readAuthState(win, waitMs).catch(() => null);
+  if (result?.loggedIn && result?.token) {
+    markAccountVerified(slot, true, result.clerkReady ? 'clerk-token-restore' : 'session-token-restore');
+    await flushAccountSession(slot).catch(() => {});
+    return result;
+  }
+
+  // Short session cookies are intentionally short lived. Clerk's durable state
+  // and partition storage can recreate them after a real navigation. Do one
+  // controlled reload before considering the account unavailable.
+  await loadForSessionRestore(win, slot);
+  result = await readAuthState(win, waitMs).catch(() => null);
+  if (result?.loggedIn && result?.token) {
+    markAccountVerified(slot, true, result.clerkReady ? 'clerk-token-reloaded' : 'session-token-reloaded');
+    await flushAccountSession(slot).catch(() => {});
+    return result;
+  }
+  return result || { clerkReady: false, loggedIn: false, token: '' };
+}
+
 async function getAuthToken(slot) {
   slot = normalizeSlot(slot);
   if (tokenInflight.has(slot)) return tokenInflight.get(slot);
 
   const job = (async () => {
-    const win = await ensureAuthWindow(slot);
-    const result = await readAuthState(win, AUTH_WAIT_MS);
+    const result = await restoreAuthState(slot, AUTH_WAIT_MS);
     const token = String(result?.token || '').trim();
     if (!result?.loggedIn || !token) {
-      throw new Error(`账号 ${slot} 尚未登录，或 Suno 登录状态暂时无法恢复，请打开账号窗口确认登录状态`);
+      const ses = sessionFor(slot);
+      const cookies = await ses.cookies.get({}).catch(() => []);
+      const durable = hasDurableClerkCookie(cookies);
+      if (!durable && result?.clerkReady) markAccountVerified(slot, false, 'clerk-session-missing');
+      throw new Error(`账号 ${slot} 登录状态未能恢复，请打开账号窗口重新登录一次`);
     }
-    markAccountVerified(slot, true, result.clerkReady ? 'clerk-token' : 'session-token');
-    await flushAccountSession(slot).catch(() => {});
     return token;
   })();
 
@@ -208,9 +246,6 @@ async function apiHeaders(slot, options = {}) {
 }
 
 // UI 状态查询必须是本地快速操作。这里绝不加载 Suno 页面，也不等待 Clerk。
-// 1) 刚登录产生 __session：立即认定已登录并记录；
-// 2) __session 过期后：使用曾经由真实 session/token 确认过的槽位状态；
-// 3) 单独的 __client 永远不能把空槽位判成已登录。
 async function getAccountStatus(slot) {
   slot = normalizeSlot(slot);
   const ses = sessionFor(slot);
@@ -231,40 +266,43 @@ async function getAccountStatus(slot) {
   }
 
   const verified = getVerifiedState(slot);
-  const loggedIn = Boolean(verified?.loggedIn);
+  const loggedIn = Boolean(verified?.loggedIn && (durableCookie || verified?.source));
   return {
     slot,
     loggedIn,
     partition: partitionFor(slot),
-    authSource: loggedIn ? 'verified-persistent-state' : 'none',
+    authSource: loggedIn ? (durableCookie ? 'durable-clerk-state' : 'verified-persistent-state') : 'none',
     durableCookie,
     authWindowOpen: Boolean(authWindows.get(slot) && !authWindows.get(slot).isDestroyed()),
   };
 }
 
-// 只用于升级后首次恢复旧账号状态，在后台运行，不阻塞 UI。
-// 仅当槽位尚无可靠记录、但存在 Clerk 持久 Cookie 时才真正打开一次隐藏页面确认。
+// 启动恢复：不仅恢复未知旧账号，也会主动唤醒“之前确认登录过”的账号。
+// 这样 __session 过期时不用等到用户提交歌曲才临时恢复 Clerk 会话。
 async function probeUnknownAccount(slot) {
   slot = normalizeSlot(slot);
   const known = getVerifiedState(slot);
-  if (known) return getAccountStatus(slot);
-
   const ses = sessionFor(slot);
   const cookies = await ses.cookies.get({});
+
   if (hasShortSessionCookie(cookies)) {
     markAccountVerified(slot, true, 'session-cookie-migration');
     return getAccountStatus(slot);
   }
-  if (!hasDurableClerkCookie(cookies)) return getAccountStatus(slot);
+
+  const shouldRestore = Boolean(known?.loggedIn || hasDurableClerkCookie(cookies));
+  if (!shouldRestore) return getAccountStatus(slot);
 
   try {
-    const win = await ensureAuthWindow(slot);
-    const result = await readAuthState(win, 10000);
-    if (result?.loggedIn) {
-      markAccountVerified(slot, true, 'clerk-migration-probe');
+    const result = await restoreAuthState(slot, AUTH_RESTORE_WAIT_MS);
+    if (result?.loggedIn && result?.token) {
+      markAccountVerified(slot, true, 'startup-clerk-restore');
       await flushAccountSession(slot).catch(() => {});
-    } else if (result?.clerkReady) {
-      markAccountVerified(slot, false, 'clerk-migration-probe');
+    } else {
+      const latestCookies = await ses.cookies.get({}).catch(() => []);
+      if (result?.clerkReady && !hasDurableClerkCookie(latestCookies)) {
+        markAccountVerified(slot, false, 'startup-session-missing');
+      }
     }
   } catch {}
   return getAccountStatus(slot);
