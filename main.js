@@ -509,6 +509,57 @@ async function postOriginal(slot, input, headers, verification = {}) {
   return { verificationRequired: false, clips };
 }
 
+function normalizeMatchText(value) {
+  return String(value || '').normalize('NFKC').trim().toLocaleLowerCase('zh-CN');
+}
+
+async function fetchRecentFeed(slot, headers) {
+  const ses = session.fromPartition(partitionFor(slot));
+  const res = await ses.fetch(`${SUNO_API}/api/feed/v3`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ filters: { trashed: 'False' }, limit: 50 }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(`读取 Suno 最近作品失败（${res.status}）`);
+  return Array.isArray(body) ? body : (body?.clips || body?.items || []);
+}
+
+function clipMatchesSubmission(clip, input) {
+  if (!clip?.id || clip?.metadata?.type === 'upload') return false;
+  const wantedTitle = normalizeMatchText(input.title);
+  const actualTitle = normalizeMatchText(clip.title);
+  if (!wantedTitle || !actualTitle) return false;
+  const titleMatch = actualTitle === wantedTitle || actualTitle.includes(wantedTitle) || wantedTitle.includes(actualTitle);
+  if (!titleMatch) return false;
+
+  const wantedPrompt = normalizeMatchText(input.lyrics).replace(/\s+/g, ' ').slice(0, 180);
+  const actualPrompt = normalizeMatchText(clip?.metadata?.prompt).replace(/\s+/g, ' ').slice(0, 180);
+  if (wantedPrompt && actualPrompt && wantedPrompt !== actualPrompt) return false;
+  return true;
+}
+
+async function recoverSiblingClipIds(slot, input, headers, beforeIds, initialIds, timeoutMs = 45000) {
+  const found = new Set((initialIds || []).filter(Boolean));
+  if (found.size >= 2) return [...found].slice(0, 2);
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && found.size < 2) {
+    try {
+      const feed = await fetchRecentFeed(slot, headers);
+      for (const clip of feed) {
+        if (!clip?.id || beforeIds.has(clip.id)) continue;
+        if (!clipMatchesSubmission(clip, input)) continue;
+        found.add(clip.id);
+        if (found.size >= 2) break;
+      }
+    } catch {}
+    if (found.size >= 2) break;
+    await sleep(2500);
+  }
+  return [...found].slice(0, 2);
+}
+
 async function submitOriginal(input) {
   const slot = String(input.slot || '1');
   const title = String(input.title || '').trim();
@@ -517,6 +568,11 @@ async function submitOriginal(input) {
   if (!lyrics) throw new Error('请填写歌词');
 
   const headers = await apiHeaders(slot);
+  let beforeIds = new Set();
+  try {
+    beforeIds = new Set((await fetchRecentFeed(slot, headers)).map(x => x?.id).filter(Boolean));
+  } catch {}
+
   let verification = {};
   const precheck = await precheckVerification(slot, headers);
   if (precheck.known && precheck.required) verification = await runOfficialVerification(slot, precheck.captchaProvider, title);
@@ -527,9 +583,20 @@ async function submitOriginal(input) {
     result = await postOriginal(slot, input, headers, verification);
   }
   if (result.verificationRequired) throw new Error('Suno 在完成官方验证后仍要求再次验证，已停止当前任务，避免重复提交。');
-  const clips = result.clips;
+
+  const initialClips = result.clips;
+  const clips = initialClips.length >= 2
+    ? initialClips.slice(0, 2)
+    : await recoverSiblingClipIds(slot, input, headers, beforeIds, initialClips);
+  const partial = clips.length < 2;
+
   return {
-    slot, title, clipIds: clips, submittedAt: new Date().toISOString(),
+    slot,
+    title,
+    clipIds: clips,
+    submittedAt: new Date().toISOString(),
+    partial,
+    warning: partial ? `Suno 本次只确认到 ${clips.length} 个版本；工具已等待并同步最近作品，但没有找到第 2 个版本。不会自动重复提交，避免额外扣费。` : '',
     tracks: clips.map(id => ({ id, url: `https://suno.com/song/${id}`, status: 'submitted' })),
   };
 }
