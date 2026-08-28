@@ -5,7 +5,7 @@
   const KEY = 'suno-batch-v058';
   const DEF = 20, MIN = 5, MAX = 300;
   const $ = id => document.getElementById(id);
-  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#039;'}[c]));
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const clamp = (n,a,b) => Math.max(a,Math.min(b,n));
   const num = (v,d) => Number.isFinite(Number(v)) ? Number(v) : d;
@@ -95,13 +95,13 @@
   }
 
   function log(t,cls=''){const b=$('batchLog');if(!b)return;b.innerHTML+=`\n<span class="${cls}">[${new Date().toLocaleTimeString()}] ${esc(t)}</span>`;b.scrollTop=b.scrollHeight;}
-  const stText=s=>({idle:'未导入',ready:'待开始',running:'运行中',paused:'已暂停',completed:'已完成',queued:'等待',submitting:'提交中',submitted:'已提交',error:'失败',invalid:'参数错误',interrupted:'中断待确认',skipped:'跳过'}[s]||s);
+  const stText=s=>({idle:'未导入',ready:'待开始',running:'运行中',paused:'已暂停',completed:'已完成',queued:'等待',submitting:'提交中',submitted:'已提交',partial:'版本不完整',error:'失败',invalid:'参数错误',interrupted:'中断待确认',skipped:'跳过'}[s]||s);
   function render(){
     if(!$('batchView'))return; const jobs=state.jobs||[], count=s=>jobs.filter(j=>j.status===s).length;
     $('batchInterval').value=state.defaultInterval||DEF;
-    $('batchStats').innerHTML=`<span>${esc(state.fileName||'未导入')}</span><span>总计 <b>${jobs.length}</b></span><span>待提交 <b>${count('queued')}</b></span><span>已提交 <b>${count('submitted')}</b></span><span>失败 <b>${count('error')}</b></span><span>中断 <b>${count('interrupted')}</b></span><span>参数错误 <b>${count('invalid')}</b></span>`;
+    $('batchStats').innerHTML=`<span>${esc(state.fileName||'未导入')}</span><span>总计 <b>${jobs.length}</b></span><span>待提交 <b>${count('queued')}</b></span><span>完整提交 <b>${count('submitted')}</b></span><span>版本不完整 <b>${count('partial')}</b></span><span>失败 <b>${count('error')}</b></span><span>中断 <b>${count('interrupted')}</b></span><span>参数错误 <b>${count('invalid')}</b></span>`;
     $('batchState').textContent=`${stText(state.status)}${countdown?` · 下一首 ${countdown} 秒后提交`:''}${state.lastError?` · ${state.lastError}`:''}`;
-    $('batchBody').innerHTML=jobs.length?jobs.map(j=>`<tr><td>${j.no}</td><td>${j.row}</td><td><b>${esc(j.title||'—')}</b></td><td>账号${esc(j.slot)}</td><td>${esc(j.modelVersion)}</td><td>${j.vocalGender==='female'?'女声':j.vocalGender==='male'?'男声':'不指定'}</td><td>${j.interval||state.defaultInterval||DEF}秒</td><td>${esc(stText(j.status))}</td><td class="batcherr">${esc(j.status==='submitted'?`${j.clipIds.length}个版本 · ${j.clipIds.map(x=>String(x).slice(0,8)).join(',')}`:j.error||'')}</td></tr>`).join(''):'<tr><td colspan="9" class="library-empty">还没有导入Excel。</td></tr>';
+    $('batchBody').innerHTML=jobs.length?jobs.map(j=>`<tr><td>${j.no}</td><td>${j.row}</td><td><b>${esc(j.title||'—')}</b></td><td>账号${esc(j.slot)}</td><td>${esc(j.modelVersion)}</td><td>${j.vocalGender==='female'?'女声':j.vocalGender==='male'?'男声':'不指定'}</td><td>${j.interval||state.defaultInterval||DEF}秒</td><td>${esc(stText(j.status))}</td><td class="batcherr">${esc(['submitted','partial'].includes(j.status)?`${j.clipIds.length}个版本 · ${j.clipIds.map(x=>String(x).slice(0,8)).join(',')}${j.error?` · ${j.error}`:''}`:j.error||'')}</td></tr>`).join(''):'<tr><td colspan="9" class="library-empty">还没有导入Excel。</td></tr>';
     $('batchStart').disabled=running||!jobs.some(j=>j.status==='queued'); $('batchStart').textContent=state.status==='paused'?'继续批量':'开始批量';
     $('batchPause').disabled=!running; $('batchChoose').disabled=running; $('batchInterval').disabled=running;
     $('batchRetry').disabled=running||!jobs.some(j=>['error','interrupted'].includes(j.status)); $('batchClear').disabled=running||!jobs.length;
@@ -127,11 +127,24 @@
         const j=state.jobs.find(x=>x.status==='queued');if(!j)break;
         const acc=await window.demoApi.accountStatus(j.slot).catch(()=>({loggedIn:false}));if(!acc.loggedIn){state.status='paused';state.lastError=`账号${j.slot}未登录，请登录后继续。`;log(state.lastError,'err');break;}
         j.status='submitting';j.error='';save();render();log(`提交Excel第${j.row}行：${j.title} / 账号${j.slot}`);
-        try{const p=payload(j),task=await window.demoApi.submitOriginal(p);await window.demoApi.saveSongSubmission({task,input:p});j.status='submitted';j.clipIds=task.clipIds||[];j.error='';save();log(`提交成功：${j.title}，${j.clipIds.length}个版本。`,'oktxt');}
+        try{
+          const p=payload(j),task=await window.demoApi.submitOriginal(p);
+          await window.demoApi.saveSongSubmission({task,input:p});
+          j.clipIds=task.clipIds||[];
+          if(task.partial||j.clipIds.length<2){
+            j.status='partial';
+            j.error=task.warning||`Suno 本次只确认到 ${j.clipIds.length} 个版本；不会自动重提，避免重复扣费。`;
+            log(`版本不完整：${j.title}，仅确认${j.clipIds.length}个版本。${j.error}`,'err');
+          }else{
+            j.status='submitted';j.error='';
+            log(`提交成功：${j.title}，2个版本。`,'oktxt');
+          }
+          save();
+        }
         catch(err){const m=err.message||String(err);j.status='error';j.error=m;state.lastError=m;save();log(`提交失败：${j.title}：${m}`,'err');if(pauseError(m)){state.status='paused';break;}}
         render();if(pauseRequested)break;if(!state.jobs.some(x=>x.status==='queued'))break;const sec=j.interval||state.defaultInterval||DEF;log(`等待${sec}秒后提交下一首。`);await spacing(sec);
       }
-      if(pauseRequested||state.status==='paused')state.status='paused';else if(!state.jobs.some(x=>x.status==='queued')){state.status='completed';state.lastError='';log(`批次结束，成功提交${state.jobs.filter(x=>x.status==='submitted').length}首。`,'oktxt');}else state.status='paused';
+      if(pauseRequested||state.status==='paused')state.status='paused';else if(!state.jobs.some(x=>x.status==='queued')){state.status='completed';state.lastError='';const ok=state.jobs.filter(x=>x.status==='submitted').length,partial=state.jobs.filter(x=>x.status==='partial').length;log(`批次结束：完整提交${ok}首${partial?`，版本不完整${partial}首`:''}。`,partial?'err':'oktxt');}else state.status='paused';
     }finally{running=false;pauseRequested=false;countdown=0;save();render();}
   }
 
