@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('demoApi', {
   runSongAutomationNow: () => ipcRenderer.invoke('library:run-automation-now'),
   saveSongSubmission: (payload) => ipcRenderer.invoke('library:save-submission', payload),
   refreshSongLibrary: () => ipcRenderer.invoke('library:refresh'),
+  syncSunoSongs: (options) => ipcRenderer.invoke('library:sync-suno', options),
   selectSongRoot: () => ipcRenderer.invoke('library:select-root'),
   openSongRoot: () => ipcRenderer.invoke('library:open-root'),
   openSongLocalDir: (clipId) => ipcRenderer.invoke('library:open-song-dir', clipId),
@@ -48,10 +49,8 @@ contextBridge.exposeInMainWorld('demoApi', {
   },
 });
 
-// Keep the Suno account area independent from renderer.js' legacy sequential
-// refresh, and add the Excel batch controller without changing the legacy page.
 window.addEventListener('DOMContentLoaded', () => {
-  for (const src of ['account_slots_fix.js', 'batch_renderer.js']) {
+  for (const src of ['account_slots_fix.js', 'batch_renderer.js', 'suno_sync_renderer.js']) {
     const script = document.createElement('script');
     script.src = src;
     script.async = false;
