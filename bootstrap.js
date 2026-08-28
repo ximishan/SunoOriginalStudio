@@ -105,19 +105,7 @@ function emitAccountStateChanged(slot, delay = 180) {
     try { state = await getAccountStatus(slot); } catch { return; }
 
     const previous = lastKnownLoginState.get(slot);
-    let current = Boolean(state.loggedIn);
-
-    // Clerk rotates short-lived session cookies. During that tiny window the cookie
-    // store can look signed-out even though the durable Clerk session is still valid.
-    // Never downgrade a known-good account on a single transient cookie observation.
-    if (previous === true && current === false) {
-      try {
-        const recovered = await probeUnknownAccount(slot);
-        if (recovered) state = recovered;
-        current = Boolean(state?.loggedIn);
-      } catch {}
-    }
-
+    const current = Boolean(state.loggedIn);
     lastKnownLoginState.set(slot, current);
     if (previous === undefined || previous !== current) sendAccountState(state);
   }, delay);
@@ -145,20 +133,6 @@ function scheduleAccountSnapshot(slot, delay = 900) {
   snapshotTimers.set(slot, timer);
 }
 
-async function maintainAccountSession(slot) {
-  try {
-    let state = await getAccountStatus(slot);
-    if (!state.loggedIn && lastKnownLoginState.get(slot) === true) {
-      try { state = await probeUnknownAccount(slot); } catch {}
-    }
-    if (state?.loggedIn) {
-      lastKnownLoginState.set(slot, true);
-      await flushAccountSession(slot).catch(() => {});
-      await saveAccountCookieSnapshot(slot).catch(() => {});
-    }
-  } catch {}
-}
-
 function installAccountPersistence() {
   for (const slot of ACCOUNT_SLOTS) {
     const ses = session.fromPartition(partitionFor(slot));
@@ -175,13 +149,7 @@ function installAccountPersistence() {
     });
   }
 
-  // Keep both Chromium's persistent store and our encrypted cookie snapshot warm.
-  // This is intentionally periodic because Clerk rotates auth cookies while the app
-  // is idle; relying only on the cookie change event was too easy to miss on Windows.
-  const timer = setInterval(() => {
-    flushAllAccountSessions().catch(() => {});
-    for (const slot of ACCOUNT_SLOTS) maintainAccountSession(slot).catch(() => {});
-  }, 20000);
+  const timer = setInterval(() => flushAllAccountSessions().catch(() => {}), 20000);
   if (typeof timer.unref === 'function') timer.unref();
 }
 
@@ -194,7 +162,6 @@ async function warmUnknownAccountStates() {
       const changed = Boolean(before.loggedIn) !== Boolean(after.loggedIn);
       lastKnownLoginState.set(slot, Boolean(after.loggedIn));
       if (changed) sendAccountState(after);
-      if (after.loggedIn) await saveAccountCookieSnapshot(slot).catch(() => {});
     } catch {}
   }
 }
@@ -225,10 +192,7 @@ app.whenReady().then(() => {
 
   setTimeout(() => warmKnownAccounts().catch(() => {}), 300);
   setTimeout(() => warmUnknownAccountStates().catch(() => {}), 1800);
-  setTimeout(() => {
-    flushAllAccountSessions().catch(() => {});
-    for (const slot of ACCOUNT_SLOTS) maintainAccountSession(slot).catch(() => {});
-  }, 3200);
+  setTimeout(() => flushAllAccountSessions().catch(() => {}), 3200);
 });
 
 let quitFlushStarted = false;
@@ -249,9 +213,7 @@ app.on('before-quit', event => {
   flushTimers.clear();
   for (const timer of snapshotTimers.values()) clearTimeout(timer);
   snapshotTimers.clear();
-
-  Promise.allSettled(ACCOUNT_SLOTS.map(slot => saveAccountCookieSnapshot(slot)))
-    .then(() => flushAllAccountSessions())
+  flushAllAccountSessions()
     .finally(() => {
       quitFlushDone = true;
       quitFlushStarted = false;
