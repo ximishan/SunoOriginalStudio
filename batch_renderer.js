@@ -120,6 +120,27 @@
   const pauseError=m=>/尚未登录|登录状态|登录.*失效|额度不足|out of credits|not enough credits/i.test(String(m));
   async function spacing(sec){countdown=clamp(num(sec,DEF),MIN,MAX);while(countdown>0&&!pauseRequested){render();await wait(1000);countdown--;}countdown=0;render();}
 
+  async function autoSyncBatchSongs(){
+    if(!window.demoApi?.syncSunoSongs)return;
+    const slots=[...new Set((state.jobs||[]).filter(j=>['submitted','partial'].includes(j.status)).map(j=>String(j.slot||'1')))].filter(x=>['1','2','3'].includes(x));
+    if(!slots.length)return;
+    log(`开始自动同步 Suno 歌曲：账号 ${slots.join('、')}…`);
+    let totalImported=0,totalScanned=0,totalMissing=0;
+    for(const slot of slots){
+      try{
+        const result=await window.demoApi.syncSunoSongs({slot,limit:100});
+        totalImported+=Number(result?.imported||result?.synced||result?.added||0);
+        totalScanned+=Number(result?.scanned||result?.total||0);
+        totalMissing+=Number(result?.missing||result?.missingCount||0);
+        log(`账号${slot}同步完成：扫描${Number(result?.scanned||result?.total||0)}个，补回${Number(result?.imported||result?.synced||result?.added||0)}个。`,'oktxt');
+      }catch(err){
+        log(`账号${slot}自动同步失败：${err?.message||err}`,'err');
+      }
+    }
+    try{await window.demoApi.refreshSongLibrary?.();}catch{}
+    log(`批量结束自动同步完成：共扫描${totalScanned}个${totalMissing?`，检测缺失${totalMissing}个`:''}，实际补回${totalImported}个。`,totalImported?'oktxt':'');
+  }
+
   async function run(){
     if(running)return;running=true;pauseRequested=false;state.status='running';state.lastError='';save();render();
     try{
@@ -144,7 +165,10 @@
         catch(err){const m=err.message||String(err);j.status='error';j.error=m;state.lastError=m;save();log(`提交失败：${j.title}：${m}`,'err');if(pauseError(m)){state.status='paused';break;}}
         render();if(pauseRequested)break;if(!state.jobs.some(x=>x.status==='queued'))break;const sec=j.interval||state.defaultInterval||DEF;log(`等待${sec}秒后提交下一首。`);await spacing(sec);
       }
-      if(pauseRequested||state.status==='paused')state.status='paused';else if(!state.jobs.some(x=>x.status==='queued')){state.status='completed';state.lastError='';const ok=state.jobs.filter(x=>x.status==='submitted').length,partial=state.jobs.filter(x=>x.status==='partial').length;log(`批次结束：完整提交${ok}首${partial?`，版本不完整${partial}首`:''}。`,partial?'err':'oktxt');}else state.status='paused';
+      if(pauseRequested||state.status==='paused')state.status='paused';else if(!state.jobs.some(x=>x.status==='queued')){
+        state.status='completed';state.lastError='';const ok=state.jobs.filter(x=>x.status==='submitted').length,partial=state.jobs.filter(x=>x.status==='partial').length;log(`批次结束：完整提交${ok}首${partial?`，版本不完整${partial}首`:''}。`,partial?'err':'oktxt');
+        await autoSyncBatchSongs();
+      }else state.status='paused';
     }finally{running=false;pauseRequested=false;countdown=0;save();render();}
   }
 
