@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { sessionFor, apiHeaders } = require('./suno_session');
 
 const SUNO_API = 'https://studio-api-prod.suno.com';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function libraryFile(app) {
   return path.join(app.getPath('userData'), 'song-library-v1.json');
@@ -67,31 +68,70 @@ function statusOf(clip) {
   return String(clip?.status || 'submitted');
 }
 
-async function fetchRecentSunoClips(slot, limit = 50) {
-  slot = String(slot || '1');
-  const headers = await apiHeaders(slot, { json: false });
-  const ses = sessionFor(slot);
-  const candidates = [
-    `${SUNO_API}/api/feed/v3?page=1&page_size=${encodeURIComponent(limit)}`,
-    `${SUNO_API}/api/feed/v2?page=1&page_size=${encodeURIComponent(limit)}`,
-    `${SUNO_API}/api/feed/?page=1&page_size=${encodeURIComponent(limit)}`,
-  ];
+async function fetchEndpointPages(ses, headers, basePath, limit) {
+  const collected = new Map();
+  const pageSize = Math.max(20, Math.min(50, limit));
+  const maxPages = Math.max(1, Math.ceil(limit / pageSize) + 2);
   let lastError = '';
-  for (const url of candidates) {
+
+  for (let page = 1; page <= maxPages && collected.size < limit; page += 1) {
+    const joiner = basePath.includes('?') ? '&' : '?';
+    const url = `${SUNO_API}${basePath}${joiner}page=${page}&page_size=${pageSize}`;
     try {
       const res = await ses.fetch(url, { headers, cache: 'no-store' });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         lastError = `HTTP ${res.status}`;
-        continue;
+        break;
       }
       const clips = rawList(body).filter(x => x?.id);
-      if (clips.length || body) return clips.slice(0, limit);
+      if (!clips.length) break;
+
+      const before = collected.size;
+      for (const clip of clips) {
+        const id = String(clip.id || '');
+        if (id && !collected.has(id)) collected.set(id, clip);
+      }
+
+      // Some Suno feed variants ignore page/page_size and keep returning page 1.
+      // Detect that and fall through to the next endpoint instead of looping forever.
+      if (collected.size === before) break;
+      if (clips.length < pageSize) break;
     } catch (e) {
       lastError = String(e?.message || e);
+      break;
     }
   }
-  throw new Error(`账号 ${slot} 读取 Suno 最近作品失败${lastError ? `：${lastError}` : ''}`);
+
+  return { clips: [...collected.values()].slice(0, limit), lastError };
+}
+
+async function fetchRecentSunoClips(slot, limit = 50) {
+  slot = String(slot || '1');
+  const headers = await apiHeaders(slot, { json: false });
+  const ses = sessionFor(slot);
+  const endpoints = ['/api/feed/v3', '/api/feed/v2', '/api/feed/'];
+  const merged = new Map();
+  const errors = [];
+
+  for (const endpoint of endpoints) {
+    const result = await fetchEndpointPages(ses, headers, endpoint, limit);
+    if (result.lastError) errors.push(`${endpoint}:${result.lastError}`);
+    for (const clip of result.clips) {
+      const id = String(clip?.id || '');
+      if (id && !merged.has(id)) merged.set(id, clip);
+    }
+    if (merged.size >= limit) break;
+  }
+
+  const clips = [...merged.values()]
+    .sort((a, b) => Date.parse(createdAtOf(b) || 0) - Date.parse(createdAtOf(a) || 0))
+    .slice(0, limit);
+
+  if (!clips.length && errors.length) {
+    throw new Error(`账号 ${slot} 读取 Suno 最近作品失败：${errors.join('；')}`);
+  }
+  return clips;
 }
 
 function makeImportedSong(clip, slot, version = 1) {
@@ -130,10 +170,7 @@ function makeImportedSong(clip, slot, version = 1) {
   };
 }
 
-async function syncRecentSongs(app, options = {}) {
-  const slot = String(options.slot || '1');
-  const limit = Math.max(10, Math.min(200, Number(options.limit || 50)));
-  const clips = await fetchRecentSunoClips(slot, limit);
+function importMissingClips(app, slot, clips) {
   const state = readState(app);
   const existingIds = new Set(state.songs.map(x => String(x.clipId || x.id || '')).filter(Boolean));
   const missing = clips.filter(x => !existingIds.has(String(x.id)));
@@ -156,14 +193,55 @@ async function syncRecentSongs(app, options = {}) {
   }
 
   if (imported.length) writeState(app, state);
+  return { missing, imported };
+}
+
+async function syncRecentSongs(app, options = {}) {
+  const slot = String(options.slot || '1');
+  const limit = Math.max(10, Math.min(200, Number(options.limit || 50)));
+  const rounds = Math.max(1, Math.min(10, Number(options.rounds || 1)));
+  const waitMs = Math.max(1000, Math.min(15000, Number(options.waitMs || 4000)));
+  const stopAfterStableRounds = Math.max(1, Math.min(4, Number(options.stopAfterStableRounds || 2)));
+
+  const seenRemote = new Map();
+  const importedIds = new Set();
+  let stableRounds = 0;
+  let lastRemoteCount = -1;
+  let executedRounds = 0;
+
+  for (let round = 1; round <= rounds; round += 1) {
+    executedRounds = round;
+    const clips = await fetchRecentSunoClips(slot, limit);
+    for (const clip of clips) {
+      const id = String(clip?.id || '');
+      if (id) seenRemote.set(id, clip);
+    }
+
+    const result = importMissingClips(app, slot, [...seenRemote.values()]);
+    for (const song of result.imported) importedIds.add(String(song.clipId));
+
+    if (seenRemote.size === lastRemoteCount && result.imported.length === 0) stableRounds += 1;
+    else stableRounds = 0;
+    lastRemoteCount = seenRemote.size;
+
+    if (round >= rounds || stableRounds >= stopAfterStableRounds) break;
+    await sleep(waitMs);
+  }
+
+  const state = readState(app);
+  const currentIds = new Set(state.songs.map(x => String(x.clipId || x.id || '')).filter(Boolean));
+  let existing = 0;
+  for (const id of seenRemote.keys()) if (currentIds.has(id)) existing += 1;
+
   return {
     slot,
-    scanned: clips.length,
-    existing: clips.length - missing.length,
-    missing: missing.length,
-    imported: imported.length,
-    importedClipIds: imported.map(x => x.clipId),
-    state: readState(app),
+    scanned: seenRemote.size,
+    existing,
+    missing: importedIds.size,
+    imported: importedIds.size,
+    importedClipIds: [...importedIds],
+    rounds: executedRounds,
+    state,
   };
 }
 
@@ -171,4 +249,4 @@ function registerSunoLibrarySyncIpc({ app, ipcMain }) {
   ipcMain.handle('library:sync-suno', async (_event, options) => syncRecentSongs(app, options || {}));
 }
 
-module.exports = { registerSunoLibrarySyncIpc, syncRecentSongs };
+module.exports = { registerSunoLibrarySyncIpc, syncRecentSongs, fetchRecentSunoClips };
