@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
   "version": "0.5.9",
-  "description": "Suno Original Studio v0.5.9 with hardened AVR-style Suno session persistence, auth retry, Excel batch parsing, and paginated song library.",
+  "description": "Suno Original Studio v0.5.9 with hardened AVR-style Suno session persistence, auth retry, Excel batch parsing, paginated song library, and Suno library sync.",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
@@ -28,11 +28,13 @@
       "deai.js",
       "song_library.js",
       "song_library_guard.js",
+      "suno_library_sync.js",
       "preload.js",
       "index.html",
       "renderer.js",
       "account_slots_fix.js",
       "batch_renderer.js",
+      "suno_sync_renderer.js",
       "node_modules/xlsx/**/*",
       "package.json"
     ],
