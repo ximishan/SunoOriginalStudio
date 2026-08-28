@@ -154,7 +154,6 @@ function installAccountPersistence() {
 }
 
 async function warmUnknownAccountStates() {
-  // UI 不等待这里。升级后恢复旧 profile / 持久 Clerk 登录状态。
   for (const slot of ACCOUNT_SLOTS) {
     try {
       const before = await getAccountStatus(slot);
@@ -174,6 +173,7 @@ installSongLibraryWriteGuard(app);
 
 const { registerDeaiIpc } = require('./deai');
 const { registerSongLibraryIpc, startSongLibraryAutomation, stopSongLibraryAutomation } = require('./song_library');
+const { registerSunoLibrarySyncIpc } = require('./suno_library_sync');
 require('./main');
 
 app.whenReady().then(() => {
@@ -181,6 +181,7 @@ app.whenReady().then(() => {
   installAccountPersistence();
   registerDeaiIpc({ app, ipcMain, dialog, shell });
   registerSongLibraryIpc({ app, ipcMain, dialog, shell });
+  registerSunoLibrarySyncIpc({ app, ipcMain });
   startSongLibraryAutomation(app);
 
   ipcMain.handle('app:profile-info', async () => ({
@@ -189,7 +190,6 @@ app.whenReady().then(() => {
     migratedFrom: profileInfo.migratedFrom || '',
   }));
 
-  // 先从加密 Cookie 快照回灌已知账号，再后台探测旧版/未知账号。
   setTimeout(() => warmKnownAccounts().catch(() => {}), 300);
   setTimeout(() => warmUnknownAccountStates().catch(() => {}), 1800);
   setTimeout(() => flushAllAccountSessions().catch(() => {}), 3200);
