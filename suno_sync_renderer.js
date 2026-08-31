@@ -25,6 +25,11 @@
     btn.className = 'secondary';
     btn.textContent = '同步 Suno 歌曲';
 
+    const toggle = document.createElement('button');
+    toggle.id = 'librarySyncToggleDebug';
+    toggle.className = 'secondary';
+    toggle.textContent = '显示日志';
+
     const status = document.createElement('span');
     status.id = 'librarySyncStatus';
     status.className = 'small';
@@ -52,16 +57,23 @@
     refresh.insertAdjacentElement('afterend', slot);
     slot.insertAdjacentElement('afterend', limit);
     limit.insertAdjacentElement('afterend', btn);
-    btn.insertAdjacentElement('afterend', status);
+    btn.insertAdjacentElement('afterend', toggle);
+    toggle.insertAdjacentElement('afterend', status);
     actions.insertAdjacentElement('afterend', debug);
+
+    toggle.onclick = () => {
+      const hidden = debug.style.display === 'none';
+      debug.style.display = hidden ? 'block' : 'none';
+      toggle.textContent = hidden ? '隐藏日志' : '显示日志';
+    };
 
     btn.onclick = async () => {
       btn.disabled = true;
       slot.disabled = true;
       limit.disabled = true;
+      toggle.disabled = true;
       status.textContent = '正在读取 Suno 最新作品，并校正本地歌曲……';
       status.className = 'small warn';
-      debug.style.display = 'block';
       debug.textContent = `开始同步\n账号：${slot.value}\n范围：最近${limit.value}个\n`;
       try {
         const result = await window.demoApi.syncSunoSongs({
@@ -94,6 +106,7 @@
         btn.disabled = false;
         slot.disabled = false;
         limit.disabled = false;
+        toggle.disabled = false;
       }
     };
   }
