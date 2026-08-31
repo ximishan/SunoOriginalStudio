@@ -151,7 +151,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.9.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.10.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -167,18 +167,18 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.9_Windows
-          path: dist/SunoOriginalStudio_v0.5.9.exe
+          name: SunoOriginalStudio_v0.5.10_Windows
+          path: dist/SunoOriginalStudio_v0.5.10.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.9
-          name: Suno Original Studio v0.5.9
+          tag_name: suno-original-studio-v0.5.10
+          name: Suno Original Studio v0.5.10
           prerelease: true
           make_latest: true
-          files: dist/SunoOriginalStudio_v0.5.9.exe
+          files: dist/SunoOriginalStudio_v0.5.10.exe
           body: |
-            v0.5.9 includes the paginated song library, Excel batch submission, stable three-slot Suno sessions, Suno library sync, updated Suno transport compatibility, automatic WAV download, and the exact AVR N19 pipeline.
+            v0.5.10 adds detailed Suno library sync diagnostics, current POST /api/feed/v3 recovery compatibility, automatic WAV download, stable three-slot Suno sessions, Excel batch submission, and the exact AVR N19 pipeline.
