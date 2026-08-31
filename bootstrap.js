@@ -173,7 +173,7 @@ const { installSunoTransportCompatibility } = require('./suno_transport_compat')
 installSongLibraryWriteGuard(app);
 
 const { registerDeaiIpc } = require('./deai');
-const { registerSongLibraryIpc, startSongLibraryAutomation, stopSongLibraryAutomation } = require('./song_library');
+const { registerSongLibraryIpc } = require('./song_library');
 const { registerSunoLibrarySyncIpc } = require('./suno_library_sync');
 require('./main');
 
@@ -184,7 +184,6 @@ app.whenReady().then(() => {
   registerDeaiIpc({ app, ipcMain, dialog, shell });
   registerSongLibraryIpc({ app, ipcMain, dialog, shell });
   registerSunoLibrarySyncIpc({ app, ipcMain });
-  startSongLibraryAutomation(app);
 
   ipcMain.handle('app:profile-info', async () => ({
     userData: app.getPath('userData'),
@@ -207,7 +206,6 @@ app.on('before-quit', event => {
   }
   event.preventDefault();
   quitFlushStarted = true;
-  stopSongLibraryAutomation();
   destroyAuthWindows();
   for (const timer of accountStateTimers.values()) clearTimeout(timer);
   accountStateTimers.clear();
