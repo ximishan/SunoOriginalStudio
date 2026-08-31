@@ -4,7 +4,14 @@
 
   const $ = id => document.getElementById(id);
 
+  function removeLegacyAutomationUi() {
+    const panel = document.querySelector('.automation-panel');
+    if (panel) panel.remove();
+  }
+
   function ensureUi() {
+    removeLegacyAutomationUi();
+
     const refresh = $('libraryRefresh');
     if (!refresh || $('librarySyncSuno')) return;
     const actions = refresh.parentElement;
