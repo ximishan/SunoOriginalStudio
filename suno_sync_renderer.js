@@ -39,22 +39,25 @@
       btn.disabled = true;
       slot.disabled = true;
       limit.disabled = true;
-      status.textContent = '正在读取 Suno 最近作品并比对本地歌曲库……';
+      status.textContent = '正在读取 Suno 最新作品，多轮检查缺失歌曲……';
       status.className = 'small warn';
       try {
         const result = await window.demoApi.syncSunoSongs({
           slot: slot.value,
           limit: Number(limit.value || 50),
+          rounds: 6,
+          waitMs: 4000,
+          stopAfterStableRounds: 3,
         });
-        status.textContent = `账号${result.slot}：扫描${result.scanned}个，本地已有${result.existing}个，发现缺失${result.missing}个，已同步${result.imported}个。`;
+        status.textContent = `账号${result.slot}：扫描${result.scanned}个，执行${result.rounds || 1}轮，补回${result.imported}个。`;
         status.className = result.imported ? 'small oktxt' : 'small';
-        if (typeof window.demoApi.listSongs === 'function') {
-          // renderer.js 监听 song-library:changed 后会刷新；这里再主动触发一次视觉刷新。
-          window.dispatchEvent(new CustomEvent('suno-library-sync-complete', { detail: result }));
-        }
+
+        // Force the visible library to reload after the backend has written recovered clips.
         try {
           const tab = $('tabLibrary');
           if (tab) tab.click();
+          await new Promise(resolve => setTimeout(resolve, 150));
+          if ($('libraryRefresh') && !$('libraryRefresh').disabled) $('libraryRefresh').click();
         } catch {}
       } catch (e) {
         status.textContent = e?.message || String(e);
