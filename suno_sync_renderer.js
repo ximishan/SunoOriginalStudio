@@ -59,7 +59,7 @@
       btn.disabled = true;
       slot.disabled = true;
       limit.disabled = true;
-      status.textContent = '正在读取 Suno 最新作品，多轮检查缺失歌曲……';
+      status.textContent = '正在读取 Suno 最新作品，并校正本地歌曲……';
       status.className = 'small warn';
       debug.style.display = 'block';
       debug.textContent = `开始同步\n账号：${slot.value}\n范围：最近${limit.value}个\n`;
@@ -71,8 +71,9 @@
           waitMs: 4000,
           stopAfterStableRounds: 3,
         });
-        status.textContent = `账号${result.slot}：扫描${result.scanned}个，执行${result.rounds || 1}轮，补回${result.imported}个。`;
-        status.className = result.imported ? 'small oktxt' : 'small';
+        const repaired = Number(result.repaired || 0);
+        status.textContent = `账号${result.slot}：扫描${result.scanned}个，执行${result.rounds || 1}轮，补回${result.imported}个，校正${repaired}个。`;
+        status.className = (result.imported || repaired) ? 'small oktxt' : 'small';
         const lines = Array.isArray(result.diagnostics) ? result.diagnostics : [];
         debug.textContent = lines.length ? lines.join('\n') : '同步完成，但后端没有返回诊断日志。';
         console.log('[Suno同步诊断]\n' + debug.textContent);
