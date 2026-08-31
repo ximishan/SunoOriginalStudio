@@ -30,10 +30,30 @@
     status.className = 'small';
     status.style.marginLeft = '4px';
 
+    const debug = document.createElement('pre');
+    debug.id = 'librarySyncDebug';
+    debug.style.cssText = [
+      'display:none',
+      'width:100%',
+      'max-height:360px',
+      'overflow:auto',
+      'white-space:pre-wrap',
+      'word-break:break-all',
+      'margin:10px 0 0',
+      'padding:10px 12px',
+      'border:1px solid rgba(255,255,255,.12)',
+      'border-radius:8px',
+      'background:rgba(0,0,0,.28)',
+      'font-size:12px',
+      'line-height:1.5',
+      'color:rgba(255,255,255,.86)'
+    ].join(';');
+
     refresh.insertAdjacentElement('afterend', slot);
     slot.insertAdjacentElement('afterend', limit);
     limit.insertAdjacentElement('afterend', btn);
     btn.insertAdjacentElement('afterend', status);
+    actions.insertAdjacentElement('afterend', debug);
 
     btn.onclick = async () => {
       btn.disabled = true;
@@ -41,6 +61,8 @@
       limit.disabled = true;
       status.textContent = '正在读取 Suno 最新作品，多轮检查缺失歌曲……';
       status.className = 'small warn';
+      debug.style.display = 'block';
+      debug.textContent = `开始同步\n账号：${slot.value}\n范围：最近${limit.value}个\n`;
       try {
         const result = await window.demoApi.syncSunoSongs({
           slot: slot.value,
@@ -51,8 +73,10 @@
         });
         status.textContent = `账号${result.slot}：扫描${result.scanned}个，执行${result.rounds || 1}轮，补回${result.imported}个。`;
         status.className = result.imported ? 'small oktxt' : 'small';
+        const lines = Array.isArray(result.diagnostics) ? result.diagnostics : [];
+        debug.textContent = lines.length ? lines.join('\n') : '同步完成，但后端没有返回诊断日志。';
+        console.log('[Suno同步诊断]\n' + debug.textContent);
 
-        // Force the visible library to reload after the backend has written recovered clips.
         try {
           const tab = $('tabLibrary');
           if (tab) tab.click();
@@ -60,8 +84,11 @@
           if ($('libraryRefresh') && !$('libraryRefresh').disabled) $('libraryRefresh').click();
         } catch {}
       } catch (e) {
-        status.textContent = e?.message || String(e);
+        const message = e?.message || String(e);
+        status.textContent = message.split('\n')[0];
         status.className = 'small err';
+        debug.textContent = message;
+        console.error('[Suno同步失败]', e);
       } finally {
         btn.disabled = false;
         slot.disabled = false;
