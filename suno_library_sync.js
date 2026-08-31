@@ -74,7 +74,9 @@ async function fetchEndpointPages(ses, headers, basePath, limit) {
   const maxPages = Math.max(1, Math.ceil(limit / pageSize) + 2);
   let lastError = '';
 
-  for (let page = 1; page <= maxPages && collected.size < limit; page += 1) {
+  // Suno feed pagination is zero-based. page=0 is the newest page.
+  // Starting at page=1 skips exactly the newest batch of songs.
+  for (let page = 0; page < maxPages && collected.size < limit; page += 1) {
     const joiner = basePath.includes('?') ? '&' : '?';
     const url = `${SUNO_API}${basePath}${joiner}page=${page}&page_size=${pageSize}`;
     try {
@@ -93,8 +95,7 @@ async function fetchEndpointPages(ses, headers, basePath, limit) {
         if (id && !collected.has(id)) collected.set(id, clip);
       }
 
-      // Some Suno feed variants ignore page/page_size and keep returning page 1.
-      // Detect that and fall through to the next endpoint instead of looping forever.
+      // Some Suno feed variants ignore page/page_size and keep returning page 0.
       if (collected.size === before) break;
       if (clips.length < pageSize) break;
     } catch (e) {
@@ -199,9 +200,10 @@ function importMissingClips(app, slot, clips) {
 async function syncRecentSongs(app, options = {}) {
   const slot = String(options.slot || '1');
   const limit = Math.max(10, Math.min(200, Number(options.limit || 50)));
-  const rounds = Math.max(1, Math.min(10, Number(options.rounds || 1)));
+  // Manual sync and batch-completion sync must tolerate Suno feed propagation delay.
+  const rounds = Math.max(1, Math.min(10, Number(options.rounds || 6)));
   const waitMs = Math.max(1000, Math.min(15000, Number(options.waitMs || 4000)));
-  const stopAfterStableRounds = Math.max(1, Math.min(4, Number(options.stopAfterStableRounds || 2)));
+  const stopAfterStableRounds = Math.max(1, Math.min(4, Number(options.stopAfterStableRounds || 3)));
 
   const seenRemote = new Map();
   const importedIds = new Set();
