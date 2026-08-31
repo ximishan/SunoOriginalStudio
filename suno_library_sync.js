@@ -68,71 +68,55 @@ function statusOf(clip) {
   return String(clip?.status || 'submitted');
 }
 
-async function fetchEndpointPages(ses, headers, basePath, limit) {
-  const collected = new Map();
-  const pageSize = Math.max(20, Math.min(50, limit));
-  const maxPages = Math.max(1, Math.ceil(limit / pageSize) + 2);
-  let lastError = '';
-
-  // Suno feed pagination is zero-based. page=0 is the newest page.
-  // Starting at page=1 skips exactly the newest batch of songs.
-  for (let page = 0; page < maxPages && collected.size < limit; page += 1) {
-    const joiner = basePath.includes('?') ? '&' : '?';
-    const url = `${SUNO_API}${basePath}${joiner}page=${page}&page_size=${pageSize}`;
-    try {
-      const res = await ses.fetch(url, { headers, cache: 'no-store' });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        lastError = `HTTP ${res.status}`;
-        break;
-      }
-      const clips = rawList(body).filter(x => x?.id);
-      if (!clips.length) break;
-
-      const before = collected.size;
-      for (const clip of clips) {
-        const id = String(clip.id || '');
-        if (id && !collected.has(id)) collected.set(id, clip);
-      }
-
-      // Some Suno feed variants ignore page/page_size and keep returning page 0.
-      if (collected.size === before) break;
-      if (clips.length < pageSize) break;
-    } catch (e) {
-      lastError = String(e?.message || e);
-      break;
-    }
+function errorDetail(body) {
+  if (!body) return '';
+  if (typeof body?.detail === 'string') return body.detail;
+  if (typeof body?.message === 'string') return body.message;
+  try {
+    const text = JSON.stringify(body?.detail ?? body);
+    return text === '{}' ? '' : text;
+  } catch {
+    return '';
   }
+}
 
-  return { clips: [...collected.values()].slice(0, limit), lastError };
+async function postFeedV3(slot, limit, forceRefresh = false) {
+  const ses = sessionFor(slot);
+  const headers = await apiHeaders(slot, { forceRefresh });
+  const effectiveLimit = Math.max(10, Math.min(50, Number(limit || 50)));
+  const res = await ses.fetch(`${SUNO_API}/api/feed/v3`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      filters: { trashed: 'False' },
+      limit: effectiveLimit,
+    }),
+    cache: 'no-store',
+  });
+  const body = await res.json().catch(() => null);
+  return { res, body, effectiveLimit };
 }
 
 async function fetchRecentSunoClips(slot, limit = 50) {
   slot = String(slot || '1');
-  const headers = await apiHeaders(slot, { json: false });
-  const ses = sessionFor(slot);
-  const endpoints = ['/api/feed/v3', '/api/feed/v2', '/api/feed/'];
-  const merged = new Map();
-  const errors = [];
 
-  for (const endpoint of endpoints) {
-    const result = await fetchEndpointPages(ses, headers, endpoint, limit);
-    if (result.lastError) errors.push(`${endpoint}:${result.lastError}`);
-    for (const clip of result.clips) {
-      const id = String(clip?.id || '');
-      if (id && !merged.has(id)) merged.set(id, clip);
-    }
-    if (merged.size >= limit) break;
+  // Current Suno/AVR workspace feed is POST /api/feed/v3 with a JSON body.
+  // The old GET ?page=... form can return an incomplete/different feed and is
+  // deliberately not used for recovery anymore.
+  let result = await postFeedV3(slot, limit, false);
+  if (result.res.status === 401 || result.res.status === 403) {
+    result = await postFeedV3(slot, limit, true);
   }
 
-  const clips = [...merged.values()]
+  if (!result.res.ok) {
+    const detail = errorDetail(result.body);
+    throw new Error(`账号 ${slot} 读取 Suno 作品失败：HTTP ${result.res.status}${detail ? ` · ${detail}` : ''}`);
+  }
+
+  return rawList(result.body)
+    .filter(x => x?.id)
     .sort((a, b) => Date.parse(createdAtOf(b) || 0) - Date.parse(createdAtOf(a) || 0))
-    .slice(0, limit);
-
-  if (!clips.length && errors.length) {
-    throw new Error(`账号 ${slot} 读取 Suno 最近作品失败：${errors.join('；')}`);
-  }
-  return clips;
+    .slice(0, result.effectiveLimit);
 }
 
 function makeImportedSong(clip, slot, version = 1) {
@@ -167,7 +151,7 @@ function makeImportedSong(clip, slot, version = 1) {
     lyricsPath: '',
     lastError: String(clip?.error_message || clip?.metadata?.error_message || ''),
     updatedAt: now,
-    syncSource: 'suno-feed',
+    syncSource: 'suno-feed-v3-post',
   };
 }
 
@@ -199,8 +183,7 @@ function importMissingClips(app, slot, clips) {
 
 async function syncRecentSongs(app, options = {}) {
   const slot = String(options.slot || '1');
-  const limit = Math.max(10, Math.min(200, Number(options.limit || 50)));
-  // Manual sync and batch-completion sync must tolerate Suno feed propagation delay.
+  const requestedLimit = Math.max(10, Math.min(200, Number(options.limit || 50)));
   const rounds = Math.max(1, Math.min(10, Number(options.rounds || 6)));
   const waitMs = Math.max(1000, Math.min(15000, Number(options.waitMs || 4000)));
   const stopAfterStableRounds = Math.max(1, Math.min(4, Number(options.stopAfterStableRounds || 3)));
@@ -208,12 +191,12 @@ async function syncRecentSongs(app, options = {}) {
   const seenRemote = new Map();
   const importedIds = new Set();
   let stableRounds = 0;
-  let lastRemoteCount = -1;
+  let lastRemoteSignature = '';
   let executedRounds = 0;
 
   for (let round = 1; round <= rounds; round += 1) {
     executedRounds = round;
-    const clips = await fetchRecentSunoClips(slot, limit);
+    const clips = await fetchRecentSunoClips(slot, requestedLimit);
     for (const clip of clips) {
       const id = String(clip?.id || '');
       if (id) seenRemote.set(id, clip);
@@ -222,9 +205,10 @@ async function syncRecentSongs(app, options = {}) {
     const result = importMissingClips(app, slot, [...seenRemote.values()]);
     for (const song of result.imported) importedIds.add(String(song.clipId));
 
-    if (seenRemote.size === lastRemoteCount && result.imported.length === 0) stableRounds += 1;
+    const signature = [...seenRemote.keys()].sort().join(',');
+    if (signature === lastRemoteSignature && result.imported.length === 0) stableRounds += 1;
     else stableRounds = 0;
-    lastRemoteCount = seenRemote.size;
+    lastRemoteSignature = signature;
 
     if (round >= rounds || stableRounds >= stopAfterStableRounds) break;
     await sleep(waitMs);
@@ -243,6 +227,9 @@ async function syncRecentSongs(app, options = {}) {
     imported: importedIds.size,
     importedClipIds: [...importedIds],
     rounds: executedRounds,
+    source: 'feed-v3-post',
+    requestedLimit,
+    effectiveLimit: Math.min(50, requestedLimit),
     state,
   };
 }
