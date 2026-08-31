@@ -80,6 +80,15 @@ function errorDetail(body) {
   }
 }
 
+function clipSummary(clip) {
+  return {
+    id: String(clip?.id || ''),
+    title: String(clip?.title || '').trim() || '未命名',
+    status: statusOf(clip),
+    createdAt: createdAtOf(clip),
+  };
+}
+
 async function postFeedV3(slot, limit, forceRefresh = false) {
   const ses = sessionFor(slot);
   const headers = await apiHeaders(slot, { forceRefresh });
@@ -97,24 +106,35 @@ async function postFeedV3(slot, limit, forceRefresh = false) {
   return { res, body, effectiveLimit };
 }
 
-async function fetchRecentSunoClips(slot, limit = 50) {
+async function fetchRecentSunoClips(slot, limit = 50, diagnostics = []) {
   slot = String(slot || '1');
+  diagnostics.push(`[feed] 账号${slot} -> POST /api/feed/v3，limit=${Math.min(50, Number(limit || 50))}`);
 
-  // Current Suno/AVR workspace feed is POST /api/feed/v3 with a JSON body.
-  // The old GET ?page=... form can return an incomplete/different feed and is
-  // deliberately not used for recovery anymore.
   let result = await postFeedV3(slot, limit, false);
+  diagnostics.push(`[feed] HTTP ${result.res.status}${result.res.ok ? ' OK' : ''}`);
   if (result.res.status === 401 || result.res.status === 403) {
+    diagnostics.push(`[feed] 收到 ${result.res.status}，强制刷新 token 后重试`);
     result = await postFeedV3(slot, limit, true);
+    diagnostics.push(`[feed] 重试 HTTP ${result.res.status}${result.res.ok ? ' OK' : ''}`);
   }
 
   if (!result.res.ok) {
     const detail = errorDetail(result.body);
-    throw new Error(`账号 ${slot} 读取 Suno 作品失败：HTTP ${result.res.status}${detail ? ` · ${detail}` : ''}`);
+    diagnostics.push(`[feed] 请求失败：${detail || '无详细错误'}`);
+    const error = new Error(`账号 ${slot} 读取 Suno 作品失败：HTTP ${result.res.status}${detail ? ` · ${detail}` : ''}`);
+    error.diagnostics = diagnostics.slice();
+    throw error;
   }
 
-  return rawList(result.body)
-    .filter(x => x?.id)
+  const all = rawList(result.body).filter(x => x?.id);
+  diagnostics.push(`[feed] 返回结构=${Array.isArray(result.body) ? 'array' : Object.keys(result.body || {}).join(',') || 'null'}，有效 clip=${all.length}`);
+  for (const clip of all.slice(0, 20)) {
+    const s = clipSummary(clip);
+    diagnostics.push(`[remote] ${s.title} | ${s.id} | ${s.status}${s.createdAt ? ` | ${s.createdAt}` : ''}`);
+  }
+  if (all.length > 20) diagnostics.push(`[remote] ...其余 ${all.length - 20} 个未展开`);
+
+  return all
     .sort((a, b) => Date.parse(createdAtOf(b) || 0) - Date.parse(createdAtOf(a) || 0))
     .slice(0, result.effectiveLimit);
 }
@@ -155,10 +175,16 @@ function makeImportedSong(clip, slot, version = 1) {
   };
 }
 
-function importMissingClips(app, slot, clips) {
+function importMissingClips(app, slot, clips, diagnostics = []) {
   const state = readState(app);
   const existingIds = new Set(state.songs.map(x => String(x.clipId || x.id || '')).filter(Boolean));
   const missing = clips.filter(x => !existingIds.has(String(x.id)));
+
+  diagnostics.push(`[local] 同步前本地歌曲=${state.songs.length}，本地 clipId=${existingIds.size}`);
+  diagnostics.push(`[diff] 远端=${clips.length}，已存在=${clips.length - missing.length}，缺失=${missing.length}`);
+  for (const clip of missing.slice(0, 20)) {
+    diagnostics.push(`[missing] ${String(clip?.title || '').trim() || '未命名'} | ${String(clip?.id || '')}`);
+  }
 
   const versionByTitle = new Map();
   for (const song of state.songs) {
@@ -175,9 +201,18 @@ function importMissingClips(app, slot, clips) {
     const song = makeImportedSong(clip, slot, nextVersion);
     state.songs.unshift(song);
     imported.push(song);
+    diagnostics.push(`[import] ${song.title} v${song.version} | ${song.clipId}`);
   }
 
-  if (imported.length) writeState(app, state);
+  if (imported.length) {
+    writeState(app, state);
+    const verifyState = readState(app);
+    diagnostics.push(`[write] 已写库 ${imported.length} 个；写入后本地歌曲=${verifyState.songs.length}`);
+    const verifyIds = new Set(verifyState.songs.map(x => String(x.clipId || x.id || '')).filter(Boolean));
+    for (const song of imported) diagnostics.push(`[verify] ${song.clipId}=${verifyIds.has(String(song.clipId)) ? '存在' : '未找到'}`);
+  } else {
+    diagnostics.push('[write] 没有缺失 clip，不执行写库');
+  }
   return { missing, imported };
 }
 
@@ -188,36 +223,50 @@ async function syncRecentSongs(app, options = {}) {
   const waitMs = Math.max(1000, Math.min(15000, Number(options.waitMs || 4000)));
   const stopAfterStableRounds = Math.max(1, Math.min(4, Number(options.stopAfterStableRounds || 3)));
 
+  const diagnostics = [];
+  diagnostics.push(`[sync] 开始：账号=${slot}，requestedLimit=${requestedLimit}，rounds=${rounds}`);
+  diagnostics.push(`[sync] library=${libraryFile(app)}`);
+
   const seenRemote = new Map();
   const importedIds = new Set();
   let stableRounds = 0;
   let lastRemoteSignature = '';
   let executedRounds = 0;
 
-  for (let round = 1; round <= rounds; round += 1) {
-    executedRounds = round;
-    const clips = await fetchRecentSunoClips(slot, requestedLimit);
-    for (const clip of clips) {
-      const id = String(clip?.id || '');
-      if (id) seenRemote.set(id, clip);
+  try {
+    for (let round = 1; round <= rounds; round += 1) {
+      executedRounds = round;
+      diagnostics.push(`----- 第 ${round}/${rounds} 轮 -----`);
+      const clips = await fetchRecentSunoClips(slot, requestedLimit, diagnostics);
+      for (const clip of clips) {
+        const id = String(clip?.id || '');
+        if (id) seenRemote.set(id, clip);
+      }
+
+      const result = importMissingClips(app, slot, [...seenRemote.values()], diagnostics);
+      for (const song of result.imported) importedIds.add(String(song.clipId));
+
+      const signature = [...seenRemote.keys()].sort().join(',');
+      if (signature === lastRemoteSignature && result.imported.length === 0) stableRounds += 1;
+      else stableRounds = 0;
+      lastRemoteSignature = signature;
+      diagnostics.push(`[round] 累计远端=${seenRemote.size}，本轮导入=${result.imported.length}，stable=${stableRounds}/${stopAfterStableRounds}`);
+
+      if (round >= rounds || stableRounds >= stopAfterStableRounds) break;
+      diagnostics.push(`[round] 等待 ${waitMs}ms 后继续`);
+      await sleep(waitMs);
     }
-
-    const result = importMissingClips(app, slot, [...seenRemote.values()]);
-    for (const song of result.imported) importedIds.add(String(song.clipId));
-
-    const signature = [...seenRemote.keys()].sort().join(',');
-    if (signature === lastRemoteSignature && result.imported.length === 0) stableRounds += 1;
-    else stableRounds = 0;
-    lastRemoteSignature = signature;
-
-    if (round >= rounds || stableRounds >= stopAfterStableRounds) break;
-    await sleep(waitMs);
+  } catch (e) {
+    const combined = Array.isArray(e?.diagnostics) ? e.diagnostics : diagnostics;
+    e.diagnostics = combined;
+    throw e;
   }
 
   const state = readState(app);
   const currentIds = new Set(state.songs.map(x => String(x.clipId || x.id || '')).filter(Boolean));
   let existing = 0;
   for (const id of seenRemote.keys()) if (currentIds.has(id)) existing += 1;
+  diagnostics.push(`[done] 扫描=${seenRemote.size}，本地已存在=${existing}，本次补回=${importedIds.size}，最终本地=${state.songs.length}`);
 
   return {
     slot,
@@ -230,12 +279,22 @@ async function syncRecentSongs(app, options = {}) {
     source: 'feed-v3-post',
     requestedLimit,
     effectiveLimit: Math.min(50, requestedLimit),
+    diagnostics,
     state,
   };
 }
 
 function registerSunoLibrarySyncIpc({ app, ipcMain }) {
-  ipcMain.handle('library:sync-suno', async (_event, options) => syncRecentSongs(app, options || {}));
+  ipcMain.handle('library:sync-suno', async (_event, options) => {
+    try {
+      return await syncRecentSongs(app, options || {});
+    } catch (e) {
+      const message = e?.message || String(e);
+      const diagnostics = Array.isArray(e?.diagnostics) ? e.diagnostics : [];
+      const wrapped = new Error(`${message}${diagnostics.length ? `\n\n[同步诊断]\n${diagnostics.join('\n')}` : ''}`);
+      throw wrapped;
+    }
+  });
 }
 
 module.exports = { registerSunoLibrarySyncIpc, syncRecentSongs, fetchRecentSunoClips };
