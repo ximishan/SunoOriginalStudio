@@ -175,6 +175,7 @@ installSongLibraryWriteGuard(app);
 const { registerDeaiIpc } = require('./deai');
 const { registerSongLibraryIpc } = require('./song_library');
 const { registerSunoLibrarySyncIpc } = require('./suno_library_sync');
+const { installSongRefreshFix } = require('./song_refresh_fix');
 require('./main');
 
 app.whenReady().then(() => {
@@ -183,6 +184,7 @@ app.whenReady().then(() => {
   installAccountPersistence();
   registerDeaiIpc({ app, ipcMain, dialog, shell });
   registerSongLibraryIpc({ app, ipcMain, dialog, shell });
+  installSongRefreshFix({ app, ipcMain });
   registerSunoLibrarySyncIpc({ app, ipcMain });
 
   ipcMain.handle('app:profile-info', async () => ({
