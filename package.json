@@ -29,6 +29,7 @@
       "deai.js",
       "song_library.js",
       "song_library_guard.js",
+      "song_refresh_fix.js",
       "suno_library_sync.js",
       "preload.js",
       "index.html",
