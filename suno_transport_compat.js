@@ -30,11 +30,24 @@ function isConvertWav(url) {
   } catch { return false; }
 }
 
-function isPresignedDownload(url) {
+function hasSignedQuery(u) {
+  const q = u.searchParams;
+  return q.has('X-Amz-Signature') || q.has('X-Amz-Credential') || q.has('AWSAccessKeyId') || (q.has('Signature') && q.has('Expires')) || q.has('Policy') || q.has('Key-Pair-Id');
+}
+
+function isSunoMediaDownload(url) {
   try {
     const u = new URL(url);
-    const q = u.searchParams;
-    return q.has('X-Amz-Signature') || q.has('X-Amz-Credential') || q.has('AWSAccessKeyId') || (q.has('Signature') && q.has('Expires'));
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+
+    if (hasSignedQuery(u)) return true;
+
+    const sunoHost = host === 'cdn1.suno.ai' || host.endsWith('.suno.ai') || host.endsWith('.suno.com');
+    const cloudHost = host.endsWith('.cloudfront.net') || host.endsWith('.amazonaws.com');
+    const audioPath = /\.(wav|mp3|m4a|flac)(?:$|\/)/i.test(path) || /audio|download|generated|wav|mp3/i.test(path);
+
+    return (sunoHost && audioPath) || (cloudHost && audioPath);
   } catch { return false; }
 }
 
@@ -59,9 +72,9 @@ function cloneHeaders(input) {
   }
 }
 
-function stripSignedDownloadHeaders(input) {
+function stripMediaDownloadHeaders(input) {
   const headers = cloneHeaders(input);
-  for (const name of ['Authorization', 'Browser-Token', 'Device-Id', 'X-Suno-Client']) {
+  for (const name of ['Authorization', 'Browser-Token', 'Device-Id', 'X-Suno-Client', 'Content-Type']) {
     try { headers.delete(name); } catch {}
   }
   return headers;
@@ -76,6 +89,13 @@ function patchAccountSession(slot) {
 
   const wrappedFetch = async (input, options = {}) => {
     const url = urlString(input);
+
+    // Media/CDN requests must keep the account partition (cookies/network stack),
+    // but must not carry Suno API authorization headers into a presigned URL.
+    if (isSunoMediaDownload(url) && !isStudioApi(url)) {
+      return originalFetch(input, { ...options, headers: stripMediaDownloadHeaders(options.headers), cache: 'no-store' });
+    }
+
     if (!isStudioApi(url)) return originalFetch(input, options);
 
     const headers = cloneHeaders(options.headers);
@@ -108,14 +128,15 @@ function patchDefaultSession() {
   const originalDefaultFetch = ses.fetch.bind(ses);
   const wrapped = async (input, options = {}) => {
     const url = urlString(input);
-    if (!isPresignedDownload(url)) return originalDefaultFetch(input, options);
+    if (!isSunoMediaDownload(url)) return originalDefaultFetch(input, options);
 
-    const cleanOptions = { ...options, headers: stripSignedDownloadHeaders(options.headers) };
+    const cleanOptions = { ...options, headers: stripMediaDownloadHeaders(options.headers), cache: 'no-store' };
     let lastResponse = null;
     let lastError = null;
 
-    // Suno 2026 下载链路要求复用 Chromium 账号分区网络栈。
-    // 预签名地址本身已经带签名，所以这里绝不附加 Authorization。
+    // Current AVR/Suno flow: download through an authenticated Suno account partition first.
+    // The URL itself may be presigned, so API auth headers are stripped, while the partition
+    // still contributes cookies, proxy/TLS state and CDN affinity.
     for (const slot of ACCOUNT_SLOTS) {
       try {
         const accountSession = patchAccountSession(slot);
@@ -127,6 +148,7 @@ function patchDefaultSession() {
       }
     }
 
+    // Final fallback only after all account sessions have been attempted.
     try {
       const response = await originalDefaultFetch(input, cleanOptions);
       if (response.ok) return response;
@@ -136,7 +158,7 @@ function patchDefaultSession() {
     }
 
     if (lastResponse) return lastResponse;
-    throw lastError || new Error('Suno 预签名下载失败');
+    throw lastError || new Error('Suno 媒体下载失败');
   };
 
   try {
