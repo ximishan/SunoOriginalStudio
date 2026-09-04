@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { version: APP_VERSION } = require('./package.json');
 
 contextBridge.exposeInMainWorld('demoApi', {
+  appVersion: APP_VERSION,
   profileInfo: () => ipcRenderer.invoke('app:profile-info'),
   accountStatus: (slot) => ipcRenderer.invoke('account:status', slot),
   openLogin: (slot) => ipcRenderer.invoke('account:open-login', slot),
@@ -50,6 +52,11 @@ contextBridge.exposeInMainWorld('demoApi', {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
+  const displayTitle = `Suno Original Studio v${APP_VERSION}`;
+  document.title = displayTitle;
+  const appHeading = document.querySelector('.wrap > h1');
+  if (appHeading) appHeading.textContent = displayTitle;
+
   for (const src of ['account_slots_fix.js', 'batch_renderer.js', 'suno_sync_renderer.js']) {
     const script = document.createElement('script');
     script.src = src;
