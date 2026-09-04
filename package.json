@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.13",
-  "description": "Suno Original Studio v0.5.13 with verified current Suno account-session WAV downloads, authenticated song-page playback media fallback, detailed download diagnostics, hardened session persistence, sync, and exact AVR N19 processing.",
+  "version": "0.5.14",
+  "description": "Suno Original Studio v0.5.14 with verified current Suno account-session WAV downloads, authenticated song-page playback media fallback, detailed download diagnostics, robust packaged version display, hardened session persistence, sync, and exact AVR N19 processing.",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
@@ -43,7 +43,7 @@
     "extraResources": [{"from":"vendor/avr-n19","to":"tools/n19","filter":["**/*"]}],
     "win": {
       "target": [{"target":"portable","arch":["x64"]}],
-      "artifactName": "SunoOriginalStudio_v0.5.13.exe"
+      "artifactName": "SunoOriginalStudio_v0.5.14.exe"
     }
   }
 }
