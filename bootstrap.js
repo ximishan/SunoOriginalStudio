@@ -187,6 +187,8 @@ app.whenReady().then(() => {
   installSongRefreshFix({ app, ipcMain });
   registerSunoLibrarySyncIpc({ app, ipcMain });
 
+  ipcMain.handle('app:get-version', async () => app.getVersion());
+
   ipcMain.handle('app:profile-info', async () => ({
     userData: app.getPath('userData'),
     sessionData: app.getPath('sessionData'),
