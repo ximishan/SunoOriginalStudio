@@ -153,7 +153,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.13.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.14.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -169,18 +169,18 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.13_Windows
-          path: dist/SunoOriginalStudio_v0.5.13.exe
+          name: SunoOriginalStudio_v0.5.14_Windows
+          path: dist/SunoOriginalStudio_v0.5.14.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.13
-          name: Suno Original Studio v0.5.13
+          tag_name: suno-original-studio-v0.5.14
+          name: Suno Original Studio v0.5.14
           prerelease: true
           make_latest: true
-          files: dist/SunoOriginalStudio_v0.5.13.exe
+          files: dist/SunoOriginalStudio_v0.5.14.exe
           body: |
-            v0.5.13 packages the verified current Suno WAV download flow: wav_file returns the official S3 WAV URL, media download runs through the Suno account session, and detailed fallback/download diagnostics remain available. Exact AVR N19 processing is unchanged.
+            v0.5.14 fixes packaged internal version display by reading Electron app.getVersion() through IPC, restores preload initialization/account slots, retains the verified current Suno WAV download flow and detailed diagnostics, and leaves the exact AVR N19 pipeline unchanged.
