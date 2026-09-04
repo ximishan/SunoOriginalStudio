@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.11",
-  "description": "Suno Original Studio v0.5.11 with current Suno account-session media download compatibility, hardened session persistence, auth retry, Excel batch parsing, paginated song library, and Suno library sync.",
+  "version": "0.5.12",
+  "description": "Suno Original Studio v0.5.12 with current Suno account-session downloads plus authenticated song-page playback media fallback, hardened session persistence, sync, and exact AVR N19 processing.",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
@@ -43,7 +43,7 @@
     "extraResources": [{"from":"vendor/avr-n19","to":"tools/n19","filter":["**/*"]}],
     "win": {
       "target": [{"target":"portable","arch":["x64"]}],
-      "artifactName": "SunoOriginalStudio_v0.5.11.exe"
+      "artifactName": "SunoOriginalStudio_v0.5.12.exe"
     }
   }
 }
