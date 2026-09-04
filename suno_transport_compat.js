@@ -7,6 +7,7 @@ const patchedSessions = new WeakSet();
 const originalFetchBySession = new WeakMap();
 const fallbackDeviceIds = new Map();
 const mediaResolveInflight = new Map();
+const mediaClipIds = new Map();
 let defaultSessionPatched = false;
 
 function sleep(ms) {
@@ -20,6 +21,31 @@ function urlString(input) {
     return String(input?.url || input || '');
   } catch {
     return String(input || '');
+  }
+}
+
+function safeUrlInfo(url) {
+  try {
+    const u = new URL(url);
+    return `${u.hostname}${u.pathname}`;
+  } catch { return String(url || '').slice(0, 160); }
+}
+
+function shortText(value, max = 180) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function emitDownloadDiag(clipId, message) {
+  const id = String(clipId || '');
+  const text = `[下载诊断] ${message}`;
+  try { console.log(`[SunoDownload ${id || '-'}] ${message}`); } catch {}
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (!win.isDestroyed() && win.webContents.getURL().startsWith('file://')) {
+        win.webContents.send('song-library:changed', { type: 'progress', clipId: id, message: text });
+      }
+    } catch {}
   }
 }
 
@@ -127,14 +153,22 @@ function stripMediaDownloadHeaders(input) {
 async function resolveMediaFromSongPage(slot, clipId) {
   const ses = sessionFor(slot);
   const pageUrl = `https://suno.com/song/${encodeURIComponent(clipId)}`;
+  emitDownloadDiag(clipId, `兜底 A：请求歌曲页面（账号 ${slot}）`);
   try {
     const response = await ses.fetch(pageUrl, { cache: 'no-store' });
+    emitDownloadDiag(clipId, `兜底 A：歌曲页面 HTTP ${response.status}，最终地址 ${safeUrlInfo(response.url || pageUrl)}`);
     if (response.ok) {
       const text = await response.text().catch(() => '');
       const found = extractMediaUrlFromText(text);
-      if (found) return found;
+      if (found) {
+        emitDownloadDiag(clipId, `兜底 A：已从页面源码找到媒体地址 ${safeUrlInfo(found)}`);
+        return found;
+      }
+      emitDownloadDiag(clipId, `兜底 A：页面源码未找到 audio_url/audioUrl/clip_url`);
     }
-  } catch {}
+  } catch (error) {
+    emitDownloadDiag(clipId, `兜底 A：歌曲页面请求异常：${shortText(error?.message || error)}`);
+  }
   return '';
 }
 
@@ -146,6 +180,7 @@ async function resolveMediaFromHiddenPlayback(slot, clipId) {
   let timeout = null;
   let onDebuggerMessage = null;
 
+  emitDownloadDiag(clipId, `兜底 B：启动隐藏播放窗口（账号 ${slot}）`);
   try {
     win = new BrowserWindow({
       show: false,
@@ -161,8 +196,14 @@ async function resolveMediaFromHiddenPlayback(slot, clipId) {
     });
 
     const wc = win.webContents;
-    try { wc.debugger.attach('1.3'); } catch {}
-    try { await wc.debugger.sendCommand('Network.enable'); } catch {}
+    try {
+      wc.debugger.attach('1.3');
+      emitDownloadDiag(clipId, '兜底 B：Chromium Network 调试器已连接');
+    } catch (error) {
+      emitDownloadDiag(clipId, `兜底 B：调试器连接失败：${shortText(error?.message || error)}`);
+    }
+    try { await wc.debugger.sendCommand('Network.enable'); }
+    catch (error) { emitDownloadDiag(clipId, `兜底 B：Network.enable 失败：${shortText(error?.message || error)}`); }
 
     const resultPromise = new Promise(resolve => {
       const finish = value => {
@@ -177,14 +218,25 @@ async function resolveMediaFromHiddenPlayback(slot, clipId) {
         const response = params?.response || {};
         const url = String(response.url || '');
         const mime = String(response.mimeType || '');
-        if (looksLikePlayableMedia(url, mime)) finish(url);
+        if (looksLikePlayableMedia(url, mime)) {
+          emitDownloadDiag(clipId, `兜底 B：Network 捕获媒体 ${safeUrlInfo(url)} | MIME=${mime || '-'}`);
+          finish(url);
+        }
       };
       wc.debugger.on('message', onDebuggerMessage);
 
-      timeout = setTimeout(() => finish(''), 16000);
+      timeout = setTimeout(() => {
+        emitDownloadDiag(clipId, '兜底 B：16 秒内没有捕获到可播放媒体请求');
+        finish('');
+      }, 16000);
     });
 
-    await win.loadURL(pageUrl).catch(() => {});
+    try {
+      await win.loadURL(pageUrl);
+      emitDownloadDiag(clipId, `兜底 B：页面已加载，当前地址 ${safeUrlInfo(wc.getURL())}`);
+    } catch (error) {
+      emitDownloadDiag(clipId, `兜底 B：页面加载异常：${shortText(error?.message || error)} | 当前地址 ${safeUrlInfo(wc.getURL())}`);
+    }
 
     for (let i = 0; i < 5 && !resolved; i += 1) {
       try {
@@ -198,13 +250,16 @@ async function resolveMediaFromHiddenPlayback(slot, clipId) {
         })()`, true);
         if (direct && looksLikePlayableMedia(String(direct))) {
           foundUrl = String(direct);
+          emitDownloadDiag(clipId, `兜底 B：DOM/Performance 找到媒体 ${safeUrlInfo(foundUrl)}`);
           resolved = true;
           break;
         }
-      } catch {}
+      } catch (error) {
+        emitDownloadDiag(clipId, `兜底 B：读取 DOM 媒体失败：${shortText(error?.message || error)}`);
+      }
 
       try {
-        await wc.executeJavaScript(`(() => {
+        const trigger = await wc.executeJavaScript(`(() => {
           const media = document.querySelector('audio, video');
           if (media) {
             try { media.currentTime = 0; } catch {}
@@ -220,16 +275,21 @@ async function resolveMediaFromHiddenPlayback(slot, clipId) {
               item.textContent || ''
             ].join(' ')));
           if (play) play.click();
-          return Boolean(media || play);
+          return { media: Boolean(media), play: Boolean(play), title: document.title || '' };
         })()`, true);
-      } catch {}
+        emitDownloadDiag(clipId, `兜底 B：第 ${i + 1} 次触发播放 media=${Boolean(trigger?.media)} playButton=${Boolean(trigger?.play)} title=${shortText(trigger?.title || '-', 80)}`);
+      } catch (error) {
+        emitDownloadDiag(clipId, `兜底 B：触发播放失败：${shortText(error?.message || error)}`);
+      }
 
       await Promise.race([resultPromise, sleep(1800)]);
     }
 
     if (!foundUrl && !resolved) foundUrl = await resultPromise;
+    if (!foundUrl) emitDownloadDiag(clipId, '兜底 B：最终没有解析到播放媒体 URL');
     return foundUrl || '';
-  } catch {
+  } catch (error) {
+    emitDownloadDiag(clipId, `兜底 B：隐藏窗口流程异常：${shortText(error?.message || error)}`);
     return '';
   } finally {
     if (timeout) clearTimeout(timeout);
@@ -249,6 +309,7 @@ async function resolvePlaybackMediaUrl(slot, clipId) {
   if (existing) return existing;
 
   const promise = (async () => {
+    emitDownloadDiag(clipId, '官方 WAV 当前没有可用地址，开始播放媒体兜底');
     const staticUrl = await resolveMediaFromSongPage(slot, clipId);
     if (staticUrl) return staticUrl;
     return resolveMediaFromHiddenPlayback(slot, clipId);
@@ -263,7 +324,8 @@ function validWavPayload(data) {
   return typeof url === 'string' && url.startsWith('http');
 }
 
-function syntheticWavResponse(mediaUrl) {
+function syntheticWavResponse(mediaUrl, clipId) {
+  if (mediaUrl && clipId) mediaClipIds.set(mediaUrl, String(clipId));
   return new Response(JSON.stringify({
     wav_file_url: mediaUrl,
     fallback_media_url: true,
@@ -285,7 +347,15 @@ function patchAccountSession(slot) {
     const url = urlString(input);
 
     if (isSunoMediaDownload(url) && !isStudioApi(url)) {
-      return originalFetch(input, { ...options, headers: stripMediaDownloadHeaders(options.headers), cache: 'no-store' });
+      const clipId = mediaClipIds.get(url) || '';
+      try {
+        const response = await originalFetch(input, { ...options, headers: stripMediaDownloadHeaders(options.headers), cache: 'no-store' });
+        if (clipId) emitDownloadDiag(clipId, `账号 ${slot} 下载媒体 ${safeUrlInfo(url)} → HTTP ${response.status} | ${response.headers.get('content-type') || '-'}`);
+        return response;
+      } catch (error) {
+        if (clipId) emitDownloadDiag(clipId, `账号 ${slot} 下载媒体网络异常：${shortText(error?.message || error)}`);
+        throw error;
+      }
     }
 
     if (!isStudioApi(url)) return originalFetch(input, options);
@@ -306,15 +376,28 @@ function patchAccountSession(slot) {
     let response = null;
     try {
       response = await originalFetch(input, next);
-      if (response.ok) {
-        const clone = response.clone();
-        const data = await clone.json().catch(() => null);
-        if (validWavPayload(data)) return response;
+      const clone = response.clone();
+      const data = await clone.json().catch(() => null);
+      emitDownloadDiag(clipId, `wav_file HTTP ${response.status} | keys=${data && typeof data === 'object' ? Object.keys(data).join(',') : '-'} | status=${shortText(data?.status || '-', 60)} | reason=${shortText(data?.reason || data?.message || '-', 120)}`);
+      if (response.ok && validWavPayload(data)) {
+        const officialUrl = data.wav_file_url || data.audio_url_wav || data.wav_url;
+        mediaClipIds.set(officialUrl, clipId);
+        emitDownloadDiag(clipId, `官方 WAV 地址可用：${safeUrlInfo(officialUrl)}`);
+        return response;
       }
-    } catch {}
+    } catch (error) {
+      emitDownloadDiag(clipId, `wav_file 请求/解析异常：${shortText(error?.message || error)}`);
+    }
 
-    const mediaUrl = await resolvePlaybackMediaUrl(slot, clipId).catch(() => '');
-    if (mediaUrl) return syntheticWavResponse(mediaUrl);
+    const mediaUrl = await resolvePlaybackMediaUrl(slot, clipId).catch(error => {
+      emitDownloadDiag(clipId, `播放媒体兜底异常：${shortText(error?.message || error)}`);
+      return '';
+    });
+    if (mediaUrl) {
+      emitDownloadDiag(clipId, `播放媒体兜底成功：${safeUrlInfo(mediaUrl)}`);
+      return syntheticWavResponse(mediaUrl, clipId);
+    }
+    emitDownloadDiag(clipId, '播放媒体兜底失败，继续返回 Suno 原始 wav_file 响应');
     if (response) return response;
     return originalFetch(input, next);
   };
@@ -339,27 +422,33 @@ function patchDefaultSession() {
     const url = urlString(input);
     if (!isSunoMediaDownload(url)) return originalDefaultFetch(input, options);
 
+    const clipId = mediaClipIds.get(url) || '';
     const cleanOptions = { ...options, headers: stripMediaDownloadHeaders(options.headers), cache: 'no-store' };
     let lastResponse = null;
     let lastError = null;
 
+    if (clipId) emitDownloadDiag(clipId, `开始媒体下载：${safeUrlInfo(url)}，优先尝试账号 Session`);
     for (const slot of ACCOUNT_SLOTS) {
       try {
         const accountSession = patchAccountSession(slot);
         const response = await accountSession.fetch(input, cleanOptions);
+        if (clipId) emitDownloadDiag(clipId, `媒体下载尝试账号 ${slot} → HTTP ${response.status}`);
         if (response.ok) return response;
         lastResponse = response;
       } catch (error) {
         lastError = error;
+        if (clipId) emitDownloadDiag(clipId, `媒体下载账号 ${slot} 网络异常：${shortText(error?.message || error)}`);
       }
     }
 
     try {
       const response = await originalDefaultFetch(input, cleanOptions);
+      if (clipId) emitDownloadDiag(clipId, `媒体下载 defaultSession → HTTP ${response.status}`);
       if (response.ok) return response;
       lastResponse = response;
     } catch (error) {
       lastError = error;
+      if (clipId) emitDownloadDiag(clipId, `媒体下载 defaultSession 网络异常：${shortText(error?.message || error)}`);
     }
 
     if (lastResponse) return lastResponse;
