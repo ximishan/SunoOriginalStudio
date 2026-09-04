@@ -94,7 +94,7 @@ jobs:
           Copy-Item -Path (Join-Path $soxExe.Directory.FullName '*') -Destination 'vendor/avr-n19/sox' -Recurse -Force
 
           $expected = @{
-            'sox.exe'='e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439';
+            'sox.exe'='e0e3cdc4bcdf5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439';
             'libflac-8.dll'='2c154aeaad085e01361b967adfec84b63db76a82a45681b3e6cdfacb6088e369';
             'libgcc_s_sjlj-1.dll'='2af381dbd5ea1a9a150307b1cba3a150321a3c3ff09fb6ead9bba1e880e03a64';
             'libgomp-1.dll'='9dbbb0cb3f31ded7fbf51141a39578c0bc5cc85b83e9b6908657a6083948b9ba';
@@ -107,7 +107,7 @@ jobs:
             'libvorbisenc-2.dll'='3b809daf958b6dedeedbe05e91a0ac016b18c871b33dc98c728f8b3440874385';
             'libvorbisfile-3.dll'='1a14d8b0749f66811dacb23b093d54d4ff88036d49fd017b0d98b21de7f9ef1d';
             'libwavpack-1.dll'='9123e73f801629a8791c80d9dc5041ee23f7f1d9ed8510f2f758269159aa26b8';
-            'libwinpthread-1.dll'='036af4b9aed20a6bd8b1993f2e0a4789c2ba555c00c0b2d72a6d6a6b8c13ef68';
+            'libwinpthread-1.dll'='036af4b9aed20a6bd8b1993f2e0a4789c2ba555d00c0b2d72a6d6a6b8c13ef68';
             'zlib1.dll'='189336a0cf1131d6a681e81b43385ade7252f7211df50774772d8c8ec40d5f8f';
           }
           foreach ($name in $expected.Keys) {
@@ -153,7 +153,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.12.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.13.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -161,7 +161,7 @@ jobs:
           $ffHash = (Get-FileHash $packedFfmpeg -Algorithm SHA256).Hash.ToLower()
           $soxHash = (Get-FileHash $packedSox -Algorithm SHA256).Hash.ToLower()
           if ($ffHash -ne '2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3') { throw "Packaged FFmpeg was modified by packaging/signing: $ffHash" }
-          if ($soxHash -ne 'e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439') { throw "Packaged SoX was modified by packaging/signing: $soxHash" }
+          if ($soxHash -ne 'e0e3cdc4bcdf5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439') { throw "Packaged SoX was modified by packaging/signing: $soxHash" }
           $filters = & $packedFfmpeg -hide_banner -filters 2>&1 | Out-String
           if ($filters -notmatch 'rubberband') { throw 'Packaged FFmpeg lost rubberband filter' }
           Write-Host "Built:" $exe.FullName $exe.Length
@@ -169,18 +169,18 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.12_Windows
-          path: dist/SunoOriginalStudio_v0.5.12.exe
+          name: SunoOriginalStudio_v0.5.13_Windows
+          path: dist/SunoOriginalStudio_v0.5.13.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.12
-          name: Suno Original Studio v0.5.12
+          tag_name: suno-original-studio-v0.5.13
+          name: Suno Original Studio v0.5.13
           prerelease: true
           make_latest: true
-          files: dist/SunoOriginalStudio_v0.5.12.exe
+          files: dist/SunoOriginalStudio_v0.5.13.exe
           body: |
-            v0.5.12 adds detailed Suno WAV/media fallback diagnostics so failures can be located at wav_file, song page, hidden playback, captured media URL, or CDN download stage. It retains account-session download compatibility and the exact AVR N19 pipeline.
+            v0.5.13 packages the verified current Suno WAV download flow: wav_file returns the official S3 WAV URL, media download runs through the Suno account session, and detailed fallback/download diagnostics remain available. Exact AVR N19 processing is unchanged.
