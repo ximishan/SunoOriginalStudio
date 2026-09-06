@@ -37,8 +37,19 @@ function urlString(input) {
   } catch { return String(input || ''); }
 }
 
+function strictUnavailableSpec(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.toLowerCase() !== 'suno-reference.local') return null;
+    const m = u.pathname.match(/^\/strict-wav-unavailable\/([^/]+)\/([^/]+)\.wav$/i);
+    return m ? { slot: decodeURIComponent(m[1]), clipId: decodeURIComponent(m[2]) } : null;
+  } catch { return null; }
+}
+
 function clipIdFromMediaUrl(url) {
   try {
+    const strict = strictUnavailableSpec(url);
+    if (strict?.clipId) return strict.clipId;
     const spec = captureSpec(url);
     if (spec?.clipId) return spec.clipId;
     const u = new URL(url);
@@ -69,7 +80,7 @@ function isDirectMediaUrl(url) {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     const pathname = u.pathname.toLowerCase();
-    if (captureSpec(url)) return true;
+    if (captureSpec(url) || strictUnavailableSpec(url)) return true;
     if (host === 'studio-api-prod.suno.com' || host === 'auth.suno.com') return false;
     const mediaHost = host.endsWith('.amazonaws.com') || host.endsWith('.cloudfront.net') ||
       host === 'cdn1.suno.ai' || /^cdn\d*\.suno\.ai$/i.test(host) || host.endsWith('.suno.ai');
@@ -183,6 +194,14 @@ function referenceLogHandler(clipId, state) {
 }
 
 async function materializeReferenceMedia(url) {
+  const strict = strictUnavailableSpec(url);
+  if (strict) {
+    emitUi(strict.clipId, '严格 WAV：Suno 官方真实 WAV 不可用，已停止；未下载 MP3，也未进行媒体嗅探或 WASAPI 录制');
+    const error = new Error('严格 WAV 模式：Suno 官方真实 WAV 不可用。未降级到 MP3，也不会把 MP3 转成 WAV。可勾选“WAV 不可用时允许降级 MP3”后重试。');
+    error.code = 'STRICT_WAV_UNAVAILABLE';
+    throw error;
+  }
+
   const spec = captureSpec(url);
   if (spec) {
     const wav = tempFile('.wav');
@@ -222,7 +241,7 @@ function patchSession(ses, label) {
       return fileResponse(result.wav, result.cleanup);
     } catch (error) {
       try { console.log(`[SunoMatureDownload] ${label} reference pipeline failed: ${error?.message || error}`); } catch {}
-      if (captureSpec(url)) throw error;
+      if (captureSpec(url) || strictUnavailableSpec(url)) throw error;
       return originalFetch(input, options);
     }
   };
