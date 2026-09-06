@@ -170,6 +170,7 @@ const profileInfo = prepareStableProfile();
 const { installSongLibraryWriteGuard } = require('./song_library_guard');
 const { installAuthFetchGuard } = require('./auth_fetch_guard');
 const { installSunoTransportCompatibility } = require('./suno_transport_compat');
+const { installMatureMediaFetch } = require('./mature_media_fetch');
 installSongLibraryWriteGuard(app);
 
 const { registerDeaiIpc } = require('./deai');
@@ -181,6 +182,7 @@ require('./main');
 app.whenReady().then(() => {
   installAuthFetchGuard();
   installSunoTransportCompatibility();
+  installMatureMediaFetch();
   installAccountPersistence();
   registerDeaiIpc({ app, ipcMain, dialog, shell });
   registerSongLibraryIpc({ app, ipcMain, dialog, shell });
