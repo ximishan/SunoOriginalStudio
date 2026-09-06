@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.18",
-  "description": "Suno Original Studio with mature-reference direct HTTP streaming for Suno media downloads, unified packaged app-version display, hardened session persistence, sync, and exact AVR N19 processing.",
+  "version": "0.5.19",
+  "description": "Suno Original Studio with the verified reference EXE download chain: official WAV, official MP3, playback media sniffing, WASAPI loopback capture, requests streaming, and exact AVR N19 processing.",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
@@ -25,6 +25,8 @@
       "main.js",
       "suno_session.js",
       "auth_fetch_guard.js",
+      "reference_runtime.js",
+      "reference_download_compat.js",
       "suno_transport_compat.js",
       "mature_media_fetch.js",
       "deai.js",
@@ -41,7 +43,11 @@
       "node_modules/xlsx/**/*",
       "package.json"
     ],
-    "extraResources": [{"from":"vendor/avr-n19","to":"tools/n19","filter":["**/*"]}],
+    "extraResources": [
+      {"from":"vendor/avr-n19","to":"tools/n19","filter":["**/*"]},
+      {"from":"vendor/reference-python","to":"tools/reference-python","filter":["**/*"]},
+      {"from":"reference_capture_helper.py","to":"tools/reference-download/reference_capture_helper.py"}
+    ],
     "win": {
       "target": [{"target":"portable","arch":["x64"]}],
       "artifactName": "SunoOriginalStudio_v${version}.exe"
