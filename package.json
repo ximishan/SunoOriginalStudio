@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.19",
-  "description": "Suno Original Studio with the verified reference EXE download chain: official WAV, official MP3, playback media sniffing, WASAPI loopback capture, requests streaming, and exact AVR N19 processing.",
+  "version": "0.5.20",
+  "description": "Suno Original Studio with strict WAV-first source selection, optional lossy fallback, the verified reference EXE download chain, and exact AVR N19 processing.",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
@@ -25,6 +25,7 @@
       "main.js",
       "suno_session.js",
       "auth_fetch_guard.js",
+      "download_policy.js",
       "reference_runtime.js",
       "reference_download_compat.js",
       "suno_transport_compat.js",
