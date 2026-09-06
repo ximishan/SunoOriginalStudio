@@ -90,6 +90,10 @@ function captureUrl(slot, clipId) {
   return `https://suno-reference.local/capture/${encodeURIComponent(String(slot))}/${encodeURIComponent(String(clipId))}.wav`;
 }
 
+function strictUnavailableUrl(slot, clipId) {
+  return `https://suno-reference.local/strict-wav-unavailable/${encodeURIComponent(String(slot))}/${encodeURIComponent(String(clipId))}.wav`;
+}
+
 async function lossyFallback(slot, clipId, originalFetch) {
   emit(clipId, '2/4 按参考 EXE 尝试官方 MP3 下载地址');
   try {
@@ -156,9 +160,7 @@ function patchAccount(slot) {
 
     if (!policy.allowMp3Fallback) {
       emit(clipId, '1/4 官方 WAV 不可用；当前为严格 WAV 模式，已停止，不会降级 MP3/媒体嗅探/WASAPI');
-      const error = new Error('严格 WAV 模式：Suno 官方真实 WAV 不可用。未降级到 MP3，也不会把 MP3 转成 WAV。可手动勾选“WAV 不可用时允许降级 MP3”后重试。');
-      error.code = 'STRICT_WAV_UNAVAILABLE';
-      throw error;
+      return synthetic(strictUnavailableUrl(slot, clipId), 'strict-wav-unavailable');
     }
 
     emit(clipId, '1/4 官方 WAV 不可用；已允许降级，继续按参考 EXE 的 MP3/媒体兜底链路');
