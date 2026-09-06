@@ -557,6 +557,68 @@ async function ensureSongDownloaded(app, song, sender) {
   }, sender) || song;
 }
 
+async function redownloadSong(app, clipId, sender) {
+  const state = readState(app);
+  let song = state.songs.find(x => String(x.clipId) === String(clipId));
+  if (!song) throw new Error('歌曲列表中没有找到这首歌');
+  if (!/^(complete|completed)$/i.test(String(song.generationStatus || ''))) {
+    throw new Error(`歌曲尚未生成完成：${song.generationStatus || 'submitted'}`);
+  }
+
+  const paths = pathsForSong(app, song);
+  fs.mkdirSync(paths.dir, { recursive: true });
+  emit(sender, {
+    type: 'progress',
+    clipId: song.clipId,
+    message: '重新下载测试：忽略本地已有源文件，重新向 Suno 请求；只重新下载，不执行 N19。',
+  });
+  updateSong(app, song.clipId, {
+    localDir: paths.dir,
+    sourceWavPath: paths.sourceWavPath,
+    wavStatus: 'downloading',
+    localStatus: 'saving',
+    lastError: '',
+  }, sender);
+
+  try {
+    const wavUrl = await requestWavUrl(song.slot, song.clipId, sender);
+    await downloadToFile(song.slot, wavUrl, paths.sourceWavPath, sender, song.clipId);
+    song = updateSong(app, song.clipId, {
+      wavUrl,
+      localDir: paths.dir,
+      sourceWavPath: paths.sourceWavPath,
+      wavStatus: 'downloaded',
+      localStatus: 'saved',
+      lastError: '',
+    }, sender) || song;
+    emit(sender, {
+      type: 'progress',
+      clipId: song.clipId,
+      message: '重新下载完成：Suno原始.wav 已更新；本次未执行 N19。',
+    });
+    return {
+      ok: true,
+      clipId: song.clipId,
+      sourceWavPath: paths.sourceWavPath,
+      localDir: paths.dir,
+    };
+  } catch (e) {
+    const error = String(e?.message || e);
+    const oldFileStillReady = fileReady(paths.sourceWavPath);
+    updateSong(app, song.clipId, {
+      wavStatus: oldFileStillReady ? 'downloaded' : 'error',
+      localStatus: oldFileStillReady ? 'saved' : 'error',
+      lastError: `重新下载失败：${error}`,
+    }, sender);
+    emit(sender, {
+      type: 'progress',
+      clipId: song.clipId,
+      message: `重新下载失败：${error}${oldFileStillReady ? '；原有本地 WAV 已保留。' : ''}`,
+    });
+    throw e;
+  }
+}
+
 async function ensureSongN19(app, song, sender) {
   song = readState(app).songs.find(x => x.clipId === song.clipId) || song;
   if (String(song.deaiStatus || '').toLowerCase() === 'complete' && fileReady(song.processedWavPath)) return song;
@@ -812,6 +874,7 @@ function registerSongLibraryIpc({ app, ipcMain, dialog, shell }) {
     if (error) throw new Error(error);
     return true;
   });
+  ipcMain.handle('library:redownload', async (event, clipId) => redownloadSong(app, clipId, event.sender));
   ipcMain.handle('library:process-selected', async (event, clipIds) => processSelectedSongs(app, Array.isArray(clipIds) ? clipIds : [], event.sender));
 }
 
