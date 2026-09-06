@@ -10,6 +10,9 @@ on:
       - 'main.js'
       - 'suno_session.js'
       - 'auth_fetch_guard.js'
+      - 'reference_runtime.js'
+      - 'reference_download_compat.js'
+      - 'reference_capture_helper.py'
       - 'suno_transport_compat.js'
       - 'mature_media_fetch.js'
       - 'deai.js'
@@ -47,6 +50,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Setup reference Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+
       - name: Install JavaScript dependencies
         run: npm install
 
@@ -58,6 +66,30 @@ jobs:
           if (-not $version) { throw 'Unable to read package.json version' }
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "App version: $version"
+
+      - name: Prepare reference EXE Python runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtime = 'vendor/reference-python'
+          Remove-Item -Recurse -Force $runtime -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+
+          $zip = Join-Path $env:RUNNER_TEMP 'python-3.11.9-embed-amd64.zip'
+          curl.exe -L --fail --retry 4 --retry-delay 2 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip' -o $zip
+          Expand-Archive -Path $zip -DestinationPath $runtime -Force
+
+          $pth = Join-Path $runtime 'python311._pth'
+          $lines = Get-Content $pth
+          $lines = $lines | ForEach-Object { if ($_ -eq '#import site') { 'import site' } else { $_ } }
+          if ($lines -notcontains 'Lib/site-packages') { $lines += 'Lib/site-packages' }
+          Set-Content -Path $pth -Value $lines -Encoding ascii
+          New-Item -ItemType Directory -Force (Join-Path $runtime 'Lib/site-packages') | Out-Null
+
+          python -m pip install --disable-pip-version-check --no-compile --target "$runtime/Lib/site-packages" `
+            requests==2.34.2 websocket-client==1.9.0 PyAudioWPatch==0.2.12.8
+
+          & "$runtime/python.exe" -c "import requests, websocket, pyaudiowpatch; assert requests.__version__=='2.34.2'; assert websocket.__version__=='1.9.0'; assert pyaudiowpatch.__version__=='0.2.12.8'; print('reference runtime ok')"
 
       - name: Verify repository Excel template
         shell: pwsh
@@ -140,6 +172,8 @@ jobs:
             'main.js',
             'suno_session.js',
             'auth_fetch_guard.js',
+            'reference_runtime.js',
+            'reference_download_compat.js',
             'suno_transport_compat.js',
             'mature_media_fetch.js',
             'deai.js',
@@ -154,13 +188,14 @@ jobs:
             'suno_sync_renderer.js'
           )
           foreach ($file in $files) { node --check $file }
+          python -m py_compile reference_capture_helper.py
 
       - name: Build portable EXE
         run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Verify packaged N19 binaries and EXE
+      - name: Verify packaged N19 and reference runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -176,6 +211,12 @@ jobs:
           if ($soxHash -ne 'e0e3cdc4bcdfbb5b91ac8f53b024964d092f89ba90130ba74b223a1df11b5439') { throw "Packaged SoX was modified by packaging/signing: $soxHash" }
           $filters = & $packedFfmpeg -hide_banner -filters 2>&1 | Out-String
           if ($filters -notmatch 'rubberband') { throw 'Packaged FFmpeg lost rubberband filter' }
+
+          $packedPython = 'dist\win-unpacked\resources\tools\reference-python\python.exe'
+          $packedHelper = 'dist\win-unpacked\resources\tools\reference-download\reference_capture_helper.py'
+          if (-not (Test-Path $packedPython)) { throw 'Packaged reference Python runtime is missing' }
+          if (-not (Test-Path $packedHelper)) { throw 'Packaged reference capture helper is missing' }
+          & $packedPython -c "import requests, websocket, pyaudiowpatch; assert requests.__version__=='2.34.2'; assert websocket.__version__=='1.9.0'; assert pyaudiowpatch.__version__=='0.2.12.8'; print('packaged reference runtime ok')"
           Write-Host "Built:" $exe.FullName $exe.Length
 
       - name: Upload artifact
@@ -195,4 +236,4 @@ jobs:
           make_latest: true
           files: dist/SunoOriginalStudio_v${{ steps.version.outputs.version }}.exe
           body: |
-            v${{ steps.version.outputs.version }} uses the mature reference EXE download pattern for Suno media: direct HTTP streaming, content-length progress, temporary .part files, redirects and retries, while keeping the existing Suno auth flow and exact AVR N19 pipeline unchanged.
+            v${{ steps.version.outputs.version }} mirrors the verified 38.8 MB reference EXE download chain: official WAV first, official download/clip MP3 fallback, playback media sniffing, requests 2.34.2 streaming with .part files and retries, then PyAudioWPatch 0.2.12.8 WASAPI loopback capture as the final fallback. Existing Suno login/session code and the exact AVR N19 pipeline remain unchanged.
