@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.16",
-  "description": "Suno Original Studio with unified packaged app-version display, verified current Suno account-session WAV downloads, guarded WAV response-body reads, authenticated song-page playback media fallback, detailed download diagnostics, hardened session persistence, sync, and exact AVR N19 processing.",
+  "version": "0.5.17",
+  "description": "Suno Original Studio with direct streaming Suno WAV downloads to disk, unified packaged app-version display, authenticated account-session media fallback, hardened session persistence, sync, and exact AVR N19 processing.",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
@@ -26,7 +26,6 @@
       "suno_session.js",
       "auth_fetch_guard.js",
       "suno_transport_compat.js",
-      "download_body_guard.js",
       "deai.js",
       "song_library.js",
       "song_library_guard.js",
