@@ -1,7 +1,7 @@
 {
   "name": "suno-original-demo",
-  "version": "0.5.20",
-  "description": "Suno Original Studio with strict WAV-first source selection, optional lossy fallback, the verified reference EXE download chain, and exact AVR N19 processing.",
+  "version": "0.5.21",
+  "description": "Suno Original Studio with strict WAV-first source selection, per-song WAV redownload testing, optional lossy fallback, the verified reference EXE download chain, and exact AVR N19 processing.",
   "main": "bootstrap.js",
   "author": "",
   "license": "MIT",
