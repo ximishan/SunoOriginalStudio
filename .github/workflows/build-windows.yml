@@ -11,6 +11,7 @@ on:
       - 'suno_session.js'
       - 'auth_fetch_guard.js'
       - 'suno_transport_compat.js'
+      - 'download_body_guard.js'
       - 'deai.js'
       - 'song_library.js'
       - 'song_library_guard.js'
@@ -131,6 +132,7 @@ jobs:
             'suno_session.js',
             'auth_fetch_guard.js',
             'suno_transport_compat.js',
+            'download_body_guard.js',
             'deai.js',
             'song_library.js',
             'song_library_guard.js',
@@ -153,7 +155,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.14.exe'
+          $exe = Get-Item 'dist\SunoOriginalStudio_v0.5.15.exe'
           if ($exe.Length -lt 100000000) { throw "EXE unexpectedly small for bundled exact N19 toolchain: $($exe.Length)" }
 
           $packedFfmpeg = 'dist\win-unpacked\resources\tools\n19\ffmpeg-win-x86_64-v7.1.exe'
@@ -169,18 +171,18 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SunoOriginalStudio_v0.5.14_Windows
-          path: dist/SunoOriginalStudio_v0.5.14.exe
+          name: SunoOriginalStudio_v0.5.15_Windows
+          path: dist/SunoOriginalStudio_v0.5.15.exe
           if-no-files-found: error
 
       - name: Publish prerelease
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: suno-original-studio-v0.5.14
-          name: Suno Original Studio v0.5.14
+          tag_name: suno-original-studio-v0.5.15
+          name: Suno Original Studio v0.5.15
           prerelease: true
           make_latest: true
-          files: dist/SunoOriginalStudio_v0.5.14.exe
+          files: dist/SunoOriginalStudio_v0.5.15.exe
           body: |
-            v0.5.14 fixes packaged internal version display by reading Electron app.getVersion() through IPC, restores preload initialization/account slots, retains the verified current Suno WAV download flow and detailed diagnostics, and leaves the exact AVR N19 pipeline unchanged.
+            v0.5.15 packages the latest Suno WAV download fixes, includes the guarded WAV response-body reader in the portable build, retains authenticated account-session media downloading and song-page fallback, keeps packaged version display on app.getVersion(), and leaves the exact AVR N19 pipeline unchanged.
