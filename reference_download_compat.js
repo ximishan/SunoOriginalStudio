@@ -1,11 +1,13 @@
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, ipcMain } = require('electron');
 const { ACCOUNT_SLOTS, sessionFor, apiHeaders } = require('./suno_session');
 const { runReferenceSniff } = require('./reference_runtime');
+const { getDownloadPolicy, setDownloadPolicy } = require('./download_policy');
 
 const SUNO_API = 'https://studio-api-prod.suno.com/api';
 const MP3_POLL_MS = 2500;
 const MP3_TIMEOUT_MS = 120000;
 const patched = new WeakSet();
+let ipcRegistered = false;
 
 function emit(clipId, message) {
   try { console.log(`[SunoReference ${clipId || '-'}] ${message}`); } catch {}
@@ -31,6 +33,15 @@ function wavFileClipId(url) {
     const u = new URL(url);
     if (u.hostname.toLowerCase() !== 'studio-api-prod.suno.com') return '';
     const m = u.pathname.match(/^\/api\/gen\/([^/]+)\/wav_file\/$/i);
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
+function convertWavClipId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.toLowerCase() !== 'studio-api-prod.suno.com') return '';
+    const m = u.pathname.match(/^\/api\/gen\/([^/]+)\/convert_wav\/$/i);
     return m ? m[1] : '';
   } catch { return ''; }
 }
@@ -79,6 +90,36 @@ function captureUrl(slot, clipId) {
   return `https://suno-reference.local/capture/${encodeURIComponent(String(slot))}/${encodeURIComponent(String(clipId))}.wav`;
 }
 
+async function lossyFallback(slot, clipId, originalFetch) {
+  emit(clipId, '2/4 按参考 EXE 尝试官方 MP3 下载地址');
+  try {
+    const mp3 = await requestMp3Url(slot, clipId, originalFetch);
+    if (mp3.url) {
+      emit(clipId, '2/4 官方 MP3 下载地址可用，交给参考流式下载器并转 WAV');
+      return synthetic(mp3.url, 'reference-download-clip');
+    }
+    if (mp3.locked) emit(clipId, `2/4 官方 MP3 被限制：${mp3.reason || 'DownloadLocked'}`);
+  } catch (error) {
+    emit(clipId, `2/4 官方 MP3 地址失败：${error?.message || error}`);
+  }
+
+  emit(clipId, '3/4 按参考 EXE 从 Suno 播放页面嗅探媒体地址');
+  try {
+    const mediaUrl = await runReferenceSniff(slot, clipId, line => {
+      if (/"kind"\s*:\s*"error"/i.test(line)) emit(clipId, line);
+    });
+    if (mediaUrl) {
+      emit(clipId, '3/4 已嗅探到播放媒体，交给参考流式下载器并转 WAV');
+      return synthetic(mediaUrl, 'reference-media-sniffer');
+    }
+  } catch (error) {
+    emit(clipId, `3/4 媒体嗅探失败：${error?.message || error}`);
+  }
+
+  emit(clipId, '4/4 没有可保存媒体 URL，进入参考 EXE 的播放 + WASAPI 回环录制');
+  return synthetic(captureUrl(slot, clipId), 'reference-playback-capture');
+}
+
 function patchAccount(slot) {
   const ses = sessionFor(slot);
   if (!ses || patched.has(ses)) return;
@@ -86,46 +127,42 @@ function patchAccount(slot) {
 
   const wrapped = async (input, options = {}) => {
     const url = urlString(input);
+    const method = String(options?.method || 'GET').toUpperCase();
+    const policy = getDownloadPolicy();
+
+    const convertClipId = convertWavClipId(url);
+    if (convertClipId && method === 'POST' && policy.format === 'mp3') {
+      emit(convertClipId, '已选择 MP3 兼容模式，跳过官方 WAV 导出请求');
+      return new Response('', { status: 409 });
+    }
+
     const clipId = wavFileClipId(url);
     if (!clipId) return originalFetch(input, options);
+
+    if (policy.format === 'mp3') {
+      emit(clipId, '1/4 已选择 MP3 兼容模式，跳过官方 WAV，按参考 EXE 直接请求 MP3');
+      return lossyFallback(slot, clipId, originalFetch);
+    }
 
     const response = await originalFetch(input, options);
     try {
       const data = await response.clone().json().catch(() => null);
       const official = responseWavUrl(data);
       if (response.ok && official) {
-        emit(clipId, '1/4 官方 WAV 地址可用');
+        emit(clipId, '1/4 官方 WAV 地址可用，严格使用真实 WAV');
         return response;
       }
     } catch {}
 
-    emit(clipId, '1/4 官方 WAV 不可用，按参考 EXE 尝试官方 MP3 下载地址');
-    try {
-      const mp3 = await requestMp3Url(slot, clipId, originalFetch);
-      if (mp3.url) {
-        emit(clipId, '2/4 官方 MP3 下载地址可用，交给参考流式下载器并转 WAV');
-        return synthetic(mp3.url, 'reference-download-clip');
-      }
-      if (mp3.locked) emit(clipId, `2/4 官方 MP3 被限制：${mp3.reason || 'DownloadLocked'}`);
-    } catch (error) {
-      emit(clipId, `2/4 官方 MP3 地址失败：${error?.message || error}`);
+    if (!policy.allowMp3Fallback) {
+      emit(clipId, '1/4 官方 WAV 不可用；当前为严格 WAV 模式，已停止，不会降级 MP3/媒体嗅探/WASAPI');
+      const error = new Error('严格 WAV 模式：Suno 官方真实 WAV 不可用。未降级到 MP3，也不会把 MP3 转成 WAV。可手动勾选“WAV 不可用时允许降级 MP3”后重试。');
+      error.code = 'STRICT_WAV_UNAVAILABLE';
+      throw error;
     }
 
-    emit(clipId, '3/4 按参考 EXE 从 Suno 播放页面嗅探媒体地址');
-    try {
-      const mediaUrl = await runReferenceSniff(slot, clipId, line => {
-        if (/"kind"\s*:\s*"error"/i.test(line)) emit(clipId, line);
-      });
-      if (mediaUrl) {
-        emit(clipId, '3/4 已嗅探到播放媒体，交给参考流式下载器并转 WAV');
-        return synthetic(mediaUrl, 'reference-media-sniffer');
-      }
-    } catch (error) {
-      emit(clipId, `3/4 媒体嗅探失败：${error?.message || error}`);
-    }
-
-    emit(clipId, '4/4 没有可保存媒体 URL，进入参考 EXE 的播放 + WASAPI 回环录制');
-    return synthetic(captureUrl(slot, clipId), 'reference-playback-capture');
+    emit(clipId, '1/4 官方 WAV 不可用；已允许降级，继续按参考 EXE 的 MP3/媒体兜底链路');
+    return lossyFallback(slot, clipId, originalFetch);
   };
 
   try { ses.fetch = wrapped; }
@@ -135,6 +172,11 @@ function patchAccount(slot) {
 
 function installReferenceDownloadCompatibility() {
   for (const slot of ACCOUNT_SLOTS) patchAccount(slot);
+  if (!ipcRegistered) {
+    ipcRegistered = true;
+    ipcMain.handle('library:get-download-policy', async () => getDownloadPolicy());
+    ipcMain.handle('library:set-download-policy', async (_event, value) => setDownloadPolicy(value || {}));
+  }
 }
 
 module.exports = { installReferenceDownloadCompatibility, captureUrl };
