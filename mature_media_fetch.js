@@ -1,26 +1,19 @@
-const http = require('http');
-const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const { Readable } = require('stream');
+const { spawn } = require('child_process');
 const { session } = require('electron');
 const { ACCOUNT_SLOTS, sessionFor } = require('./suno_session');
+const { tempFile, ffmpegPath, runReferenceSaveUrl, runReferenceCapture } = require('./reference_runtime');
 
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36';
-const ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9,en;q=0.8';
-const REQUEST_TIMEOUT_MS = 30000;
-const MAX_REDIRECTS = 6;
 const patchedSessions = new WeakSet();
-
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
 
 function urlString(input) {
   try {
     if (typeof input === 'string') return input;
     if (input instanceof URL) return input.toString();
     return String(input?.url || input || '');
-  } catch {
-    return String(input || '');
-  }
+  } catch { return String(input || ''); }
 }
 
 function isSignedQuery(u) {
@@ -29,120 +22,130 @@ function isSignedQuery(u) {
     (q.has('Signature') && q.has('Expires')) || q.has('Policy') || q.has('Key-Pair-Id');
 }
 
+function captureSpec(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.toLowerCase() !== 'suno-reference.local') return null;
+    const m = u.pathname.match(/^\/capture\/([^/]+)\/([^/]+)\.wav$/i);
+    return m ? { slot: decodeURIComponent(m[1]), clipId: decodeURIComponent(m[2]) } : null;
+  } catch { return null; }
+}
+
 function isDirectMediaUrl(url) {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     const pathname = u.pathname.toLowerCase();
+    if (captureSpec(url)) return true;
     if (host === 'studio-api-prod.suno.com' || host === 'auth.suno.com') return false;
-
     const mediaHost = host.endsWith('.amazonaws.com') || host.endsWith('.cloudfront.net') ||
       host === 'cdn1.suno.ai' || /^cdn\d*\.suno\.ai$/i.test(host) || host.endsWith('.suno.ai');
     const audioPath = /\.(wav|mp3|m4a|flac|aac|ogg|webm)$/i.test(pathname) ||
       /\/studio\/uploads\//i.test(pathname) || /audio|generated|stream/i.test(pathname);
-
     return isSignedQuery(u) || (mediaHost && audioPath);
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
-function headerGetter(headers) {
-  const normalized = new Map();
-  for (const [key, value] of Object.entries(headers || {})) {
-    normalized.set(String(key).toLowerCase(), Array.isArray(value) ? value.join(', ') : String(value ?? ''));
-  }
+function isWavFile(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(12);
+    const count = fs.readSync(fd, head, 0, 12, 0);
+    fs.closeSync(fd);
+    if (count < 12) return false;
+    const riff = head.subarray(0, 4).toString('ascii');
+    const wave = head.subarray(8, 12).toString('ascii');
+    return (riff === 'RIFF' || riff === 'RF64' || riff === 'RIFX') && wave === 'WAVE';
+  } catch { return false; }
+}
+
+function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = ffmpegPath();
+    if (!ffmpeg) { reject(new Error('参考下载器找不到 FFmpeg')); return; }
+    const child = spawn(ffmpeg, args, { windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', d => {
+      stderr += d.toString();
+      if (stderr.length > 20000) stderr = stderr.slice(-20000);
+    });
+    child.on('error', reject);
+    child.on('close', code => code === 0 ? resolve() : reject(new Error(stderr.slice(-1600) || `FFmpeg exit ${code}`)));
+  });
+}
+
+async function normalizeToReferenceWav(source) {
+  if (isWavFile(source)) return source;
+  const target = tempFile('.wav');
+  await runFfmpeg([
+    '-hide_banner', '-loglevel', 'error', '-y', '-i', source,
+    '-vn', '-map_metadata', '-1', '-c:a', 'pcm_s24le', '-f', 'wav', target,
+  ]);
+  if (!fs.existsSync(target) || fs.statSync(target).size <= 0) throw new Error('参考下载器 FFmpeg 没有生成 WAV');
+  return target;
+}
+
+function fileResponse(file, cleanupFiles = []) {
+  const size = fs.statSync(file).size;
+  const nodeStream = fs.createReadStream(file);
+  nodeStream.on('close', () => {
+    for (const p of cleanupFiles) {
+      try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+    }
+  });
+  const body = typeof Readable.toWeb === 'function' ? Readable.toWeb(nodeStream) : null;
+  if (!body) throw new Error('ERR_STREAM_UNAVAILABLE: 无法建立参考下载文件流');
+  const headers = new Map([
+    ['content-type', 'audio/wav'],
+    ['content-length', String(size)],
+  ]);
   return {
-    get(name) {
-      return normalized.get(String(name || '').toLowerCase()) || null;
-    },
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    url: `file://${file}`,
+    headers: { get: name => headers.get(String(name || '').toLowerCase()) || null },
+    body,
   };
 }
 
-function directRequest(url, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    let parsed;
-    try { parsed = new URL(url); }
-    catch (error) { reject(error); return; }
-
-    const transport = parsed.protocol === 'http:' ? http : https;
-    const request = transport.request(parsed, {
-      method: 'GET',
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Accept-Language': ACCEPT_LANGUAGE,
-        'Accept': '*/*',
-      },
-      agent: parsed.protocol === 'http:' ? httpAgent : httpsAgent,
-    }, response => {
-      const status = Number(response.statusCode || 0);
-      const location = response.headers.location;
-      if ([301, 302, 303, 307, 308].includes(status) && location) {
-        if (redirects >= MAX_REDIRECTS) {
-          response.resume();
-          reject(new Error(`下载重定向超过 ${MAX_REDIRECTS} 次`));
-          return;
-        }
-        const next = new URL(location, parsed).toString();
-        response.resume();
-        directRequest(next, redirects + 1).then(resolve, reject);
-        return;
-      }
-
-      const body = typeof Readable.toWeb === 'function' ? Readable.toWeb(response) : null;
-      if (!body) {
-        response.destroy();
-        reject(new Error('ERR_STREAM_UNAVAILABLE: Node HTTP 响应无法转换为流'));
-        return;
-      }
-
-      resolve({
-        ok: status >= 200 && status < 300,
-        status,
-        statusText: String(response.statusMessage || ''),
-        headers: headerGetter(response.headers),
-        body,
-        url: parsed.toString(),
-      });
+async function materializeReferenceMedia(url) {
+  const spec = captureSpec(url);
+  if (spec) {
+    const wav = tempFile('.wav');
+    await runReferenceCapture(spec.slot, spec.clipId, wav, line => {
+      try { console.log(`[SunoReferenceCapture ${spec.clipId}] ${line}`); } catch {}
     });
+    return { wav, cleanup: [wav] };
+  }
 
-    request.setTimeout(REQUEST_TIMEOUT_MS, () => {
-      const error = new Error(`ERR_TIMED_OUT: HTTP ${Math.round(REQUEST_TIMEOUT_MS / 1000)} 秒无响应`);
-      error.code = 'ETIMEDOUT';
-      request.destroy(error);
-    });
-    request.on('error', reject);
-    request.end();
+  const source = tempFile(path.extname(new URL(url).pathname) || '.media');
+  await runReferenceSaveUrl(url, source, line => {
+    try { console.log(`[SunoReferenceSave] ${line}`); } catch {}
   });
+  const wav = await normalizeToReferenceWav(source);
+  return { wav, cleanup: wav === source ? [source] : [source, wav] };
 }
 
 function patchSession(ses, label) {
   if (!ses || patchedSessions.has(ses) || typeof ses.fetch !== 'function') return;
   const originalFetch = ses.fetch.bind(ses);
-
   const wrappedFetch = async (input, options = {}) => {
     const url = urlString(input);
     const method = String(options?.method || 'GET').toUpperCase();
     if (method !== 'GET' || !isDirectMediaUrl(url)) return originalFetch(input, options);
-
     try {
-      const response = await directRequest(url);
-      try {
-        const u = new URL(url);
-        console.log(`[SunoMatureDownload] ${label} direct HTTP ${response.status} ${u.hostname}${u.pathname}`);
-      } catch {}
-      return response;
+      const result = await materializeReferenceMedia(url);
+      try { console.log(`[SunoMatureDownload] ${label} reference pipeline ready: ${url.slice(0, 140)}`); } catch {}
+      return fileResponse(result.wav, result.cleanup);
     } catch (error) {
-      try { console.log(`[SunoMatureDownload] ${label} direct HTTP failed: ${error?.message || error}`); } catch {}
-      throw error;
+      try { console.log(`[SunoMatureDownload] ${label} reference pipeline failed: ${error?.message || error}`); } catch {}
+      if (captureSpec(url)) throw error;
+      return originalFetch(input, options);
     }
   };
-
-  try {
-    ses.fetch = wrappedFetch;
-  } catch {
-    try { Object.defineProperty(ses, 'fetch', { configurable: true, writable: true, value: wrappedFetch }); } catch {}
-  }
+  try { ses.fetch = wrappedFetch; }
+  catch { try { Object.defineProperty(ses, 'fetch', { configurable: true, writable: true, value: wrappedFetch }); } catch {} }
   patchedSessions.add(ses);
 }
 
