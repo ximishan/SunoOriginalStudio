@@ -42,6 +42,10 @@ contextBridge.exposeInMainWorld('demoApi', {
   getSongPlaySource: (clipId) => ipcRenderer.invoke('library:get-play-source', clipId),
   getDownloadPolicy: () => ipcRenderer.invoke('library:get-download-policy'),
   setDownloadPolicy: (value) => ipcRenderer.invoke('library:set-download-policy', value),
+  redownloadSong: async (clipId) => {
+    await ipcRenderer.invoke('library:set-download-policy', readDownloadPolicyFromDom());
+    return ipcRenderer.invoke('library:redownload', clipId);
+  },
   processSelectedSongs: async (clipIds) => {
     await ipcRenderer.invoke('library:set-download-policy', readDownloadPolicyFromDom());
     return ipcRenderer.invoke('library:process-selected', clipIds);
@@ -138,6 +142,61 @@ function installDownloadPolicyUi() {
   sync();
 }
 
+function appendLibraryUiLog(text, cls = 'err') {
+  const box = document.getElementById('libraryLog');
+  if (!box) return;
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = `\n[${new Date().toLocaleTimeString()}] ${String(text || '')}`;
+  box.appendChild(span);
+  box.scrollTop = box.scrollHeight;
+}
+
+function installRedownloadButtons() {
+  const body = document.getElementById('songTableBody');
+  if (!body || body.dataset.redownloadObserverInstalled === '1') return;
+  body.dataset.redownloadObserverInstalled = '1';
+
+  const apply = () => {
+    for (const sunoButton of body.querySelectorAll('button[data-open-suno]')) {
+      const clipId = String(sunoButton.dataset.openSuno || '');
+      if (!clipId) continue;
+      const actions = sunoButton.parentElement;
+      if (!actions || actions.querySelector(`button[data-redownload-song="${clipId}"]`)) continue;
+
+      const button = document.createElement('button');
+      button.className = 'secondary';
+      button.dataset.redownloadSong = clipId;
+      button.textContent = '重新下载 WAV';
+      const playButton = actions.querySelector('button[data-play-song]');
+      button.disabled = Boolean(playButton?.disabled);
+      button.onclick = async () => {
+        if (button.dataset.busy === '1') return;
+        button.dataset.busy = '1';
+        button.disabled = true;
+        button.textContent = '重新下载中…';
+        try {
+          await ipcRenderer.invoke('library:set-download-policy', readDownloadPolicyFromDom());
+          await ipcRenderer.invoke('library:redownload', clipId);
+        } catch (error) {
+          appendLibraryUiLog(`${clipId.slice(0, 8)}：${error?.message || error}`, 'err');
+        } finally {
+          button.dataset.busy = '0';
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = '重新下载 WAV';
+          }
+        }
+      };
+      actions.appendChild(button);
+    }
+  };
+
+  const observer = new MutationObserver(() => apply());
+  observer.observe(body, { childList: true, subtree: true });
+  apply();
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   // 先立即移除 index.html 中任何历史硬编码版本，避免打包后短暂或永久显示旧版本。
   applyAppTitle('');
@@ -148,6 +207,7 @@ window.addEventListener('DOMContentLoaded', () => {
     .catch(() => applyAppTitle(''));
 
   installDownloadPolicyUi();
+  installRedownloadButtons();
 
   for (const src of ['account_slots_fix.js', 'batch_renderer.js', 'suno_sync_renderer.js']) {
     const script = document.createElement('script');
