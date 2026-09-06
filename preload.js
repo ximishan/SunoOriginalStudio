@@ -50,15 +50,21 @@ contextBridge.exposeInMainWorld('demoApi', {
   },
 });
 
+function applyAppTitle(version = '') {
+  const displayTitle = version ? `Suno Original Studio v${version}` : 'Suno Original Studio';
+  document.title = displayTitle;
+  const appHeading = document.querySelector('.wrap > h1');
+  if (appHeading) appHeading.textContent = displayTitle;
+}
+
 window.addEventListener('DOMContentLoaded', () => {
+  // 先立即移除 index.html 中任何历史硬编码版本，避免打包后短暂或永久显示旧版本。
+  applyAppTitle('');
+
+  // 软件版本只认 Electron 打包版本（package.json -> app.getVersion()）。
   ipcRenderer.invoke('app:get-version')
-    .then(version => {
-      const displayTitle = `Suno Original Studio v${version}`;
-      document.title = displayTitle;
-      const appHeading = document.querySelector('.wrap > h1');
-      if (appHeading) appHeading.textContent = displayTitle;
-    })
-    .catch(() => {});
+    .then(version => applyAppTitle(String(version || '').trim()))
+    .catch(() => applyAppTitle(''));
 
   for (const src of ['account_slots_fix.js', 'batch_renderer.js', 'suno_sync_renderer.js']) {
     const script = document.createElement('script');
