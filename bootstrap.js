@@ -169,6 +169,7 @@ async function warmUnknownAccountStates() {
 const profileInfo = prepareStableProfile();
 const { installSongLibraryWriteGuard } = require('./song_library_guard');
 const { installAuthFetchGuard } = require('./auth_fetch_guard');
+const { installReferenceDownloadCompatibility } = require('./reference_download_compat');
 const { installSunoTransportCompatibility } = require('./suno_transport_compat');
 const { installMatureMediaFetch } = require('./mature_media_fetch');
 installSongLibraryWriteGuard(app);
@@ -181,6 +182,7 @@ require('./main');
 
 app.whenReady().then(() => {
   installAuthFetchGuard();
+  installReferenceDownloadCompatibility();
   installSunoTransportCompatibility();
   installMatureMediaFetch();
   installAccountPersistence();
