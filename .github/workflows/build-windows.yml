@@ -11,7 +11,7 @@ on:
       - 'suno_session.js'
       - 'auth_fetch_guard.js'
       - 'suno_transport_compat.js'
-      - 'download_body_guard.js'
+      - 'mature_media_fetch.js'
       - 'deai.js'
       - 'song_library.js'
       - 'song_library_guard.js'
@@ -141,7 +141,7 @@ jobs:
             'suno_session.js',
             'auth_fetch_guard.js',
             'suno_transport_compat.js',
-            'download_body_guard.js',
+            'mature_media_fetch.js',
             'deai.js',
             'song_library.js',
             'song_library_guard.js',
@@ -195,4 +195,4 @@ jobs:
           make_latest: true
           files: dist/SunoOriginalStudio_v${{ steps.version.outputs.version }}.exe
           body: |
-            v${{ steps.version.outputs.version }} uses package.json as the single software-version source for the packaged app title, EXE filename, GitHub artifact, and prerelease tag/name. It retains the latest Suno WAV download fixes and leaves the exact AVR N19 pipeline unchanged.
+            v${{ steps.version.outputs.version }} uses the mature reference EXE download pattern for Suno media: direct HTTP streaming, content-length progress, temporary .part files, redirects and retries, while keeping the existing Suno auth flow and exact AVR N19 pipeline unchanged.
