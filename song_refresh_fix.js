@@ -8,6 +8,7 @@ const BATCH_SIZE = 20;
 const DOWNLOAD_BODY_TIMEOUT_MS = 60000;
 const DOWNLOAD_PROGRESS_STEP_BYTES = 5 * 1024 * 1024;
 const mediaDiagPatchedSessions = new WeakSet();
+let fileWriteDiagInstalled = false;
 
 function libraryFile(app) {
   return path.join(app.getPath('userData'), 'song-library-v1.json');
@@ -87,6 +88,14 @@ function clipIdFromMediaUrl(url) {
   }
 }
 
+function clipIdFromFilePath(filePath) {
+  const text = String(filePath || '');
+  const uuid = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+  if (uuid) return uuid[0];
+  const shortId = text.match(/-([0-9a-f]{8})(?:\\|\/|\.|$)/i);
+  return shortId ? shortId[1] : '-';
+}
+
 function formatMb(bytes) {
   return `${(Number(bytes || 0) / 1024 / 1024).toFixed(2)} MB`;
 }
@@ -105,6 +114,56 @@ function emitDownloadDiag(clipId, message) {
       }
     } catch {}
   }
+}
+
+function installFileWriteDiagnostics() {
+  if (fileWriteDiagInstalled) return;
+  fileWriteDiagInstalled = true;
+
+  const originalWriteFileSync = fs.writeFileSync.bind(fs);
+  const originalRenameSync = fs.renameSync.bind(fs);
+
+  fs.writeFileSync = function patchedWriteFileSync(file, data, ...args) {
+    const target = String(file || '');
+    const isWavPart = /\.wav\.part$/i.test(target);
+    const clipId = isWavPart ? clipIdFromFilePath(target) : '-';
+    if (isWavPart) {
+      const bytes = Buffer.isBuffer(data) ? data.length : (data?.byteLength || 0);
+      emitDownloadDiag(clipId, `开始写入临时 WAV：${target}${bytes ? `，大小=${formatMb(bytes)}` : ''}`);
+    }
+    try {
+      const result = originalWriteFileSync(file, data, ...args);
+      if (isWavPart) {
+        let size = 0;
+        try { size = fs.statSync(target).size; } catch {}
+        emitDownloadDiag(clipId, `临时 WAV 写入完成：${target}${size ? `，磁盘大小=${formatMb(size)}` : ''}`);
+      }
+      return result;
+    } catch (error) {
+      if (isWavPart) emitDownloadDiag(clipId, `临时 WAV 写入失败：${error?.message || error}`);
+      throw error;
+    }
+  };
+
+  fs.renameSync = function patchedRenameSync(oldPath, newPath) {
+    const source = String(oldPath || '');
+    const target = String(newPath || '');
+    const isWavFinalize = /\.wav\.part$/i.test(source) && /\.wav$/i.test(target);
+    const clipId = isWavFinalize ? clipIdFromFilePath(source) : '-';
+    if (isWavFinalize) emitDownloadDiag(clipId, `准备将临时文件重命名为正式 WAV：${target}`);
+    try {
+      const result = originalRenameSync(oldPath, newPath);
+      if (isWavFinalize) {
+        let size = 0;
+        try { size = fs.statSync(target).size; } catch {}
+        emitDownloadDiag(clipId, `正式 WAV 保存成功：${target}${size ? `，大小=${formatMb(size)}` : ''}`);
+      }
+      return result;
+    } catch (error) {
+      if (isWavFinalize) emitDownloadDiag(clipId, `正式 WAV 重命名失败：${error?.message || error}`);
+      throw error;
+    }
+  };
 }
 
 async function readWithTimeout(reader) {
@@ -269,6 +328,7 @@ async function refreshLibrary(app) {
 }
 
 function installSongRefreshFix({ app, ipcMain }) {
+  installFileWriteDiagnostics();
   installMediaBodyDiagnostics();
   ipcMain.removeHandler('library:refresh');
   ipcMain.handle('library:refresh', async () => refreshLibrary(app));
