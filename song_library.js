@@ -9,8 +9,11 @@ const { sessionFor, apiHeaders } = require('./suno_session');
 const SUNO_API = 'https://studio-api-prod.suno.com';
 const WAV_TIMEOUT_MS = 150000;
 const DEFAULT_POLL_INTERVAL_MS = 5000;
-const DOWNLOAD_MAX_ATTEMPTS = 4;      // WAV 下载最多尝试次数（含首次）
-const DOWNLOAD_RETRY_BASE_MS = 1500;  // 下载失败重试基础退避
+const DOWNLOAD_MAX_ATTEMPTS = 3;
+const DOWNLOAD_RETRY_BASE_MS = 1200;
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30000;
+const DOWNLOAD_PROGRESS_BYTES = 5 * 1024 * 1024;
+const STATUS_BATCH_SIZE = 20;
 
 let activeProcess = null;
 let automationTimer = null;
@@ -23,7 +26,7 @@ const automationRetry = new Map();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // 可重试的偶发网络/SSL 错误（Chromium 网络栈 + 通用网络错误）
-const TRANSIENT_NET_RE = /ERR_SSL_PROTOCOL_ERROR|ERR_CONNECTION|ERR_NETWORK|ERR_TIMED_OUT|ERR_SOCKET|ERR_EMPTY_RESPONSE|ERR_ADDRESS_UNREACHABLE|ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|network|fetch failed|502|503|504/i;
+const TRANSIENT_NET_RE = /ERR_SSL_PROTOCOL_ERROR|ERR_CONNECTION|ERR_NETWORK|ERR_TIMED_OUT|ERR_SOCKET|ERR_EMPTY_RESPONSE|ERR_STREAM_UNAVAILABLE|ERR_ADDRESS_UNREACHABLE|ERR_NAME_NOT_RESOLVED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|network|fetch failed|502|503|504/i;
 
 function isTransientNetworkError(err) {
   return TRANSIENT_NET_RE.test(String(err?.message || err || ''));
@@ -134,6 +137,15 @@ function emit(sender, payload) {
   }
 }
 
+function downloadDiag(sender, clipId, message) {
+  try { console.log(`[SunoDownload ${clipId || '-'}] ${message}`); } catch {}
+  emit(sender, { type: 'progress', clipId: clipId || '', message: `[下载] ${message}` });
+}
+
+function formatMb(bytes) {
+  return `${(Number(bytes || 0) / 1024 / 1024).toFixed(2)} MB`;
+}
+
 function safeName(value, fallback = '未命名') {
   const cleaned = String(value || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim();
   return (cleaned || fallback).slice(0, 70);
@@ -183,26 +195,34 @@ function saveSubmission(app, payload = {}) {
   return state;
 }
 
+async function fetchStatusBatch(slot, songs, forceRefresh = false) {
+  const headers = await apiHeaders(slot, { json: false, forceRefresh });
+  const ses = sessionFor(slot);
+  const ids = songs.map(x => x.clipId).filter(Boolean);
+  return ses.fetch(`${SUNO_API}/api/feed/v2?ids=${encodeURIComponent(ids.join(','))}`, { headers, cache: 'no-store' });
+}
+
 async function refreshSlotSongs(slot, songs) {
   if (!songs.length) return;
-  const headers = await apiHeaders(slot, { json: false });
-  const ses = sessionFor(slot);
-  const ids = songs.map(x => x.clipId);
-  const res = await ses.fetch(`${SUNO_API}/api/feed/v2?ids=${encodeURIComponent(ids.join(','))}`, { headers });
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`账号 ${slot} 读取歌曲状态失败（${res.status}）`);
-  const raw = Array.isArray(body) ? body : (body?.clips || body?.items || []);
-  const byId = new Map(raw.map(x => [x.id, x]));
   const now = new Date().toISOString();
-  for (const song of songs) {
-    const x = byId.get(song.clipId);
-    if (!x) continue;
-    song.generationStatus = String(x.status || song.generationStatus || 'submitted');
-    song.title = x.title || song.title;
-    song.audioUrl = x.audio_url || song.audioUrl || '';
-    song.duration = Number(x.metadata?.duration || song.duration || 0);
-    song.lastError = x.error_message || x.metadata?.error_message || '';
-    song.updatedAt = now;
+  for (let i = 0; i < songs.length; i += STATUS_BATCH_SIZE) {
+    const batch = songs.slice(i, i + STATUS_BATCH_SIZE);
+    let res = await fetchStatusBatch(slot, batch, false);
+    if (res.status === 401 || res.status === 403) res = await fetchStatusBatch(slot, batch, true);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(`账号 ${slot} 读取歌曲状态失败（${res.status}）`);
+    const raw = Array.isArray(body) ? body : (body?.clips || body?.items || []);
+    const byId = new Map(raw.map(x => [String(x.id), x]));
+    for (const song of batch) {
+      const x = byId.get(String(song.clipId));
+      if (!x) continue;
+      song.generationStatus = String(x.status || song.generationStatus || 'submitted');
+      song.title = x.title || song.title;
+      song.audioUrl = x.audio_url || song.audioUrl || '';
+      song.duration = Number(x.metadata?.duration || song.duration || 0);
+      song.lastError = x.error_message || x.metadata?.error_message || '';
+      song.updatedAt = now;
+    }
   }
 }
 
@@ -318,7 +338,6 @@ async function requestWavUrl(slot, clipId, sender) {
         if (url) return url;
       }
     } catch (e) {
-      // 轮询期间的偶发网络/SSL 错误不应中断整个流程，继续等待重试。
       if (!isTransientNetworkError(e)) throw e;
     }
     emit(sender, { type: 'progress', clipId, message: 'Suno 正在生成 WAV，等待中…' });
@@ -327,39 +346,129 @@ async function requestWavUrl(slot, clipId, sender) {
   throw new Error('等待 Suno WAV 导出超过 150 秒');
 }
 
-// 单次下载尝试。Suno 的 WAV 下载 URL 是带签名的 CDN 地址，不依赖账号 Cookie，
-// 因此默认用干净的默认 session 发起（避免绑定账号 session 偶发的 TLS 握手问题）。
-async function downloadAttempt(url, filePath, useAccountSession, slot) {
+function isWavHeader(buffer) {
+  if (!buffer || buffer.length < 12) return false;
+  const riff = buffer.subarray(0, 4).toString('ascii');
+  const wave = buffer.subarray(8, 12).toString('ascii');
+  return (riff === 'RIFF' || riff === 'RF64' || riff === 'RIFX') && wave === 'WAVE';
+}
+
+async function readBodyChunk(reader) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`ERR_TIMED_OUT: 连续 ${Math.round(DOWNLOAD_IDLE_TIMEOUT_MS / 1000)} 秒没有收到 WAV 数据`)), DOWNLOAD_IDLE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function streamResponseToFile(res, url, filePath, sender, clipId, sourceLabel) {
+  const reader = res.body && typeof res.body.getReader === 'function' ? res.body.getReader() : null;
+  if (!reader) throw new Error('ERR_STREAM_UNAVAILABLE: Electron 没有提供可读取的媒体响应流');
+
+  const total = Number(res.headers?.get?.('content-length') || 0);
+  const contentType = String(res.headers?.get?.('content-type') || '').toLowerCase();
+  const tmp = `${filePath}.part`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+
+  let handle = null;
+  let received = 0;
+  let firstBytes = Buffer.alloc(0);
+  let lastReportedBytes = 0;
+  let lastReportedAt = Date.now();
+  const startedAt = Date.now();
+
+  downloadDiag(sender, clipId, `开始流式下载（${sourceLabel}）${total > 0 ? `，预计 ${formatMb(total)}` : '，大小未知'}`);
+
+  try {
+    handle = await fs.promises.open(tmp, 'w');
+    while (true) {
+      const { done, value } = await readBodyChunk(reader);
+      if (done) break;
+      if (!value || !value.byteLength) continue;
+
+      const chunk = Buffer.from(value);
+      await handle.write(chunk);
+      received += chunk.length;
+
+      if (firstBytes.length < 12) {
+        const need = 12 - firstBytes.length;
+        firstBytes = Buffer.concat([firstBytes, chunk.subarray(0, need)]);
+      }
+
+      const now = Date.now();
+      if (received - lastReportedBytes >= DOWNLOAD_PROGRESS_BYTES || now - lastReportedAt >= 3000) {
+        const elapsed = Math.max(0.001, (now - startedAt) / 1000);
+        const speed = received / 1024 / 1024 / elapsed;
+        const percent = total > 0 ? ` / ${formatMb(total)}（${Math.min(100, Math.round(received * 100 / total))}%）` : '';
+        downloadDiag(sender, clipId, `已下载 ${formatMb(received)}${percent}，平均 ${speed.toFixed(2)} MB/s`);
+        lastReportedBytes = received;
+        lastReportedAt = now;
+      }
+    }
+
+    await handle.close();
+    handle = null;
+
+    if (received <= 0) throw new Error('ERR_EMPTY_RESPONSE: Suno WAV 返回 HTTP 200，但响应正文为 0 字节');
+    if (total > 0 && received !== total) {
+      throw new Error(`ERR_INCOMPLETE_RESPONSE: WAV 下载不完整，期望 ${total} 字节，实际 ${received} 字节`);
+    }
+
+    const looksWav = /audio\/(wav|x-wav|wave)/i.test(contentType) || /\.wav(?:$|[?#])/i.test(url);
+    if (looksWav && !isWavHeader(firstBytes)) {
+      throw new Error('ERR_INVALID_WAV: 下载内容不是有效的 RIFF/WAVE 文件');
+    }
+
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    await fs.promises.rename(tmp, filePath);
+    const elapsed = Math.max(0.001, (Date.now() - startedAt) / 1000);
+    const speed = received / 1024 / 1024 / elapsed;
+    downloadDiag(sender, clipId, `WAV 保存完成：${formatMb(received)}，耗时 ${elapsed.toFixed(1)} 秒，平均 ${speed.toFixed(2)} MB/s`);
+  } catch (error) {
+    try { await reader.cancel(error); } catch {}
+    if (handle) {
+      try { await handle.close(); } catch {}
+    }
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+    throw error;
+  }
+}
+
+async function downloadAttempt(url, filePath, useAccountSession, slot, sender, clipId) {
   const ses = useAccountSession ? sessionFor(slot) : session.defaultSession;
+  const sourceLabel = useAccountSession ? `账号 ${slot} Session` : '兼容下载 Session';
   const res = await ses.fetch(url, { cache: 'no-store' });
   if (!res.ok) {
     const err = new Error(`下载 Suno WAV 失败（HTTP ${res.status}）`);
     err.httpStatus = res.status;
     throw err;
   }
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (!buffer.length) throw new Error('下载到的 Suno WAV 为空');
-  const tmp = `${filePath}.part`;
-  fs.writeFileSync(tmp, buffer);
-  fs.renameSync(tmp, filePath);
+  await streamResponseToFile(res, url, filePath, sender, clipId, sourceLabel);
 }
 
 async function downloadToFile(slot, url, filePath, sender, clipId) {
   let lastError = null;
   for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt += 1) {
-    // 第 1 次用默认 session；若失败则在后续尝试中交替回退到账号 session，兼容两种网络路径。
-    const useAccountSession = attempt % 2 === 0;
+    // 优先用歌曲所属账号 Session；第二次走兼容 Session（会尝试其他已登录账号），第三次再回到所属账号。
+    const useAccountSession = attempt !== 2;
     try {
-      if (attempt > 1 && sender) {
-        emit(sender, { type: 'progress', clipId, message: `下载 Suno WAV 重试中（第 ${attempt}/${DOWNLOAD_MAX_ATTEMPTS} 次${useAccountSession ? '，改用账号会话' : ''}）…` });
+      if (attempt > 1) {
+        emit(sender, { type: 'progress', clipId, message: `下载 Suno WAV 重试中（第 ${attempt}/${DOWNLOAD_MAX_ATTEMPTS} 次${useAccountSession ? `，账号 ${slot}` : '，兼容会话'}）…` });
       }
-      await downloadAttempt(url, filePath, useAccountSession, slot);
+      await downloadAttempt(url, filePath, useAccountSession, slot, sender, clipId);
       return;
     } catch (e) {
       lastError = e;
-      // HTTP 4xx（除 408/429）通常不可重试（如 403 无权限、404 链接失效）。
+      downloadDiag(sender, clipId, `第 ${attempt}/${DOWNLOAD_MAX_ATTEMPTS} 次下载失败：${e?.message || e}`);
       const status = Number(e?.httpStatus || 0);
-      const retriableHttp = status === 0 || status === 408 || status === 429 || status >= 500;
+      const retriableHttp = status === 0 || status === 403 || status === 408 || status === 429 || status >= 500;
       const retriable = (isTransientNetworkError(e) || retriableHttp) && attempt < DOWNLOAD_MAX_ATTEMPTS;
       if (!retriable) break;
       await sleep(DOWNLOAD_RETRY_BASE_MS * attempt);
@@ -391,10 +500,8 @@ function pathsForSong(app, song) {
   const state = readState(app);
   const rootDir = state.rootDir || defaultRoot(app);
   const dir = song.localDir || songDir(rootDir, song);
-  // 消痕 WAV 的基础名，歌词文件与其保持完全一致（仅扩展名不同），方便一一配对。
   const processedBase = `${safeName(song.title)}-消痕-N19`;
   const processedWavPath = song.processedWavPath || path.join(dir, `${processedBase}.wav`);
-  // 歌词文件名跟随消痕 WAV：<歌名>-消痕-N19.txt
   const lyricsPath = path.join(dir, `${path.basename(processedWavPath, path.extname(processedWavPath))}.txt`);
   return {
     rootDir,
@@ -402,7 +509,6 @@ function pathsForSong(app, song) {
     lyricsPath,
     sourceWavPath: song.sourceWavPath || path.join(dir, `${safeName(song.title)}-Suno原始.wav`),
     processedWavPath,
-    // 旧命名，用于迁移：程序早期把歌词固定存成“歌词.txt”，或记录在 song.lyricsPath 中。
     legacyLyricsPaths: [
       song.lyricsPath && song.lyricsPath !== lyricsPath ? song.lyricsPath : '',
       path.join(dir, '歌词.txt'),
@@ -414,7 +520,6 @@ async function ensureSongDownloaded(app, song, sender) {
   const paths = pathsForSong(app, song);
   fs.mkdirSync(paths.dir, { recursive: true });
   if (!fileReady(paths.lyricsPath)) {
-    // 若存在旧命名的歌词文件（如“歌词.txt”），重命名为与消痕 WAV 一致的新名，避免重复。
     const legacy = (paths.legacyLyricsPaths || []).find(p => p !== paths.lyricsPath && fileReady(p));
     if (legacy) {
       try { fs.renameSync(legacy, paths.lyricsPath); }
